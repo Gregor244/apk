@@ -53,11 +53,6 @@ android.accept_sdk_license = True
 android.enable_androidx = True
 android.allow_backup = True
 
-# Multidex dla pandas/numpy
-
-android.add_gradle_dependencies = androidx.multidex:multidex:2.0.1
-
-# -------------------------
 
 # P4A
 
