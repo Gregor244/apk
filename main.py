@@ -6,6 +6,7 @@ import certifi
 import webbrowser
 import time
 import re
+import copy
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
@@ -55,6 +56,13 @@ FINNHUB_KEY = "d82t3s1r01ql4onfbbngd82t3s1r01ql4onfbbo0"
 IS_GITHUB = os.getenv("GITHUB_ACTIONS") == "true"
 CACHE_LOCK = threading.Lock()
 MAX_CACHE_SIZE = 250
+REQUEST_SESSION = requests.Session()
+REQUEST_SESSION.headers.update(HEADERS)
+
+# Lightweight TTL caches to reduce repeated network load and crashes
+QUICK_TICKER_CACHE = {}   # ticker -> {"ts": ..., "data": {...}}
+QUICK_META_CACHE = {}      # ticker -> {"ts": ..., "data": {...}}
+QUICK_GAINER_CACHE = {}    # screener_id -> {"ts": ..., "data": [...]}
 
 PL_DAYS = {
     "Monday": "PONIEDZIAŁEK", "Tuesday": "WTOREK", "Wednesday": "ŚRODA",
@@ -333,10 +341,18 @@ def company_display(sym, data):
     return f"{sym} ({name})" if name and name.upper() != sym.upper() else sym
 
 
-def enrich_company_meta(sym, data=None):
+def enrich_company_meta(sym, data=None, force=False):
     data = dict(data or {})
     name = normalize_company_name(sym, data.get("name", sym))
     market_cap = safe_number(data.get("market_cap", 0), 0.0)
+
+    if not force:
+        cached = _ttl_hit(QUICK_META_CACHE, sym, 21600)  # 6h
+        if cached:
+            merged = dict(data)
+            merged.update({k: v for k, v in cached.items() if v not in (None, "", 0)})
+            return merged
+
     if (name == sym or not name or market_cap <= 0) and sym:
         try:
             prof = safe_request(f"https://finnhub.io/api/v1/stock/profile2?symbol={sym}&token={FINNHUB_KEY}", timeout=4).json()
@@ -345,6 +361,7 @@ def enrich_company_meta(sym, data=None):
                     data["name"] = normalize_company_name(sym, prof["name"])
                 if market_cap <= 0 and prof.get("marketCapitalization"):
                     data["market_cap"] = float(prof["marketCapitalization"]) * 1_000_000
+            _ttl_set(QUICK_META_CACHE, sym, data)
         except Exception:
             pass
     return data
@@ -591,7 +608,7 @@ def fetch_top_gainers_by_type(scr_id="day_gainers"):
     return []
 
 
-def fetch_ticker_data(ticker):
+def fetch_ticker_data(ticker, force=False):
     quote_url = f"https://query2.finance.yahoo.com/v7/finance/quote?symbols={ticker}"
     chart_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1y"
 
@@ -605,6 +622,11 @@ def fetch_ticker_data(ticker):
         'pe': "N/A", 'market_cap': 0, 'day_low': 0.0, 'day_high': 0.0, 'year_low': 0.0, 'year_high': 0.0
     }
 
+
+    if not force:
+        cached = _ttl_hit(QUICK_TICKER_CACHE, ticker, 90)
+        if cached is not None:
+            return cached
     try:
         rq = safe_request(quote_url, headers=HEADERS, timeout=5)
         if rq.status_code == 200:
@@ -711,21 +733,24 @@ def fetch_ticker_data(ticker):
     if res_data['name'] == ticker:
         res_data['name'] = normalize_company_name(ticker, res_data['name'])
 
+    _ttl_set(QUICK_TICKER_CACHE, ticker, res_data)
     return res_data
 
-def fetch_bulk_ticker_data(tickers):
+def fetch_bulk_ticker_data(tickers, force=False):
     bulk_results = {}
     unique = [t for t in dict.fromkeys([str(x).strip().upper() for x in tickers if x]) if t]
     if not unique:
         return bulk_results
 
-    chunk_size = 12 if len(unique) > 12 else max(1, len(unique))
+    # Smaller chunks reduce peak load and Android crashes
+    chunk_size = 8 if len(unique) > 8 else max(1, len(unique))
     for chunk in chunked_list(unique, chunk_size):
-        max_workers = min(3, len(chunk))
+        max_workers = min(2, len(chunk))
         if max_workers < 1:
             max_workers = 1
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = executor.map(lambda ticker: (ticker, fetch_ticker_data(ticker)), chunk)
+            results = executor.map(lambda ticker: (ticker, fetch_ticker_data(ticker, force=force)), chunk)
             for ticker, data in results:
                 if data and safe_number(data.get('price', 0.0), 0.0) > 0:
                     bulk_results[ticker] = data
@@ -755,7 +780,7 @@ def merge_with_cache(sym, new_data, cache):
 def fetch_finnhub_ticker_data(ticker):
     base_url = "https://finnhub.io/api/v1"
     params = {"symbol": ticker, "token": FINNHUB_KEY}
-    res_data = fetch_ticker_data(ticker)
+    res_data = fetch_ticker_data(ticker, force=False)
     res_data['eps'] = "N/A"
     res_data['div_yield'] = "N/A"
     res_data['next_earnings'] = "Brak danych"
@@ -1169,7 +1194,7 @@ class SkanerTab(ScrollableTab):
         bulk_data = fetch_bulk_ticker_data(all_tickers)
 
         app = MDApp.get_running_app()
-        add_cache_items(app, bulk_data, visible_symbols=all_tickers)
+        add_cache_items(app, bulk_data, visible_symbols=required)
 
         signature = tuple(sorted([s for s in all_tickers if s in bulk_data]))
 
@@ -1442,7 +1467,7 @@ class KatalizatoryTab(ScrollableTab):
                 "partnership OR agreement OR collaboration OR strategic deal OR new contract",
             ]
             for q in catalyst_queries:
-                res_news = safe_request(f"https://query2.finance.yahoo.com/v1/finance/search?q={q}&newsCount=18", headers=HEADERS, timeout=6)
+                res_news = safe_request(f"https://query2.finance.yahoo.com/v1/finance/search?q={q}&newsCount=12", headers=HEADERS, timeout=6)
                 if res_news.status_code != 200:
                     continue
                 for n in res_news.json().get("news", []):
@@ -1479,7 +1504,7 @@ class KatalizatoryTab(ScrollableTab):
                             calendar_data[date_str]["raw_items"].append(item)
 
             search_query = "PDUFA OR FDA approval OR clinical trial OR earnings OR merger OR acquisition OR contract OR AI transformation"
-            res_news = safe_request(f"https://query2.finance.yahoo.com/v1/finance/search?q={search_query}&newsCount=35", headers=HEADERS, timeout=6)
+            res_news = safe_request(f"https://query2.finance.yahoo.com/v1/finance/search?q={search_query}&newsCount=15", headers=HEADERS, timeout=6)
             if res_news.status_code == 200:
                 for n in res_news.json().get("news", []):
                     pub_time = n.get('providerPublishTime', 0)
@@ -1706,8 +1731,8 @@ class NewsTab(ScrollableTab):
 
         # PR / watchlist news
         if watch_list:
-            query = " OR ".join(watch_list[:15])
-            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&newsCount=30"
+            query = " OR ".join(watch_list[:12])
+            url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&newsCount=20"
             try:
                 res = safe_request(url, headers=HEADERS, timeout=8)
                 if res.status_code == 200:
@@ -1814,7 +1839,7 @@ class CfdShortTab(ScrollableTab):
         tickers = []
         for scr in screeners:
             try:
-                tickers.extend(fetch_top_gainers_by_type(scr)[:20])
+                tickers.extend(fetch_top_gainers_by_type(scr)[:12])
             except Exception as e:
                 print(f"screeners universe error {scr}: {e}")
         tickers.extend(["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX", "AVGO"])
@@ -1831,8 +1856,8 @@ class CfdShortTab(ScrollableTab):
         force = kwargs.get('force', False)
         app = MDApp.get_running_app()
 
-        universe = self._screeners_universe()[:48]
-        cfd_universe = self._cfd_universe()[:30]
+        universe = self._screeners_universe()[:32]
+        cfd_universe = self._cfd_universe()[:18]
         required = list(dict.fromkeys(universe + cfd_universe))
         is_cache_fresh = app.cache_time and (datetime.now() - app.cache_time).total_seconds() < 180 and not force
 
@@ -1840,7 +1865,7 @@ class CfdShortTab(ScrollableTab):
             bulk_data = {k: app.shared_cache[k] for k in required if k in app.shared_cache}
         else:
             bulk_data = fetch_bulk_ticker_data(required)
-            add_cache_items(app, bulk_data, visible_symbols=all_tickers)
+            add_cache_items(app, bulk_data, visible_symbols=required)
 
         a_candidates = []
         b_candidates = []
