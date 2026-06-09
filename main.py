@@ -9,6 +9,7 @@ import re
 import copy
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
+from collections import deque
 
 from kivy.config import Config
 Config.set('graphics', 'multisamples', '0')
@@ -52,6 +53,12 @@ if platform == 'android':
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"}
 FINNHUB_KEY = "d82t3s1r01ql4onfbbngd82t3s1r01ql4onfbbo0"
+
+REQUEST_SESSION = requests.Session()
+REQUEST_SESSION.headers.update(HEADERS)
+
+SCREENER_CACHE = {}
+COMPANY_META_CACHE = {}
 
 IS_GITHUB = os.getenv("GITHUB_ACTIONS") == "true"
 CACHE_LOCK = threading.Lock()
@@ -396,105 +403,24 @@ def is_merger_mna_title(title):
 
 def safe_request(url, timeout=5, retries=3, headers=None, **kwargs):
     headers = headers or HEADERS
+    kwargs.setdefault("verify", certifi.where())
     last_exc = None
     for i in range(retries):
         try:
-            return requests.get(url, headers=headers, timeout=timeout, **kwargs)
+            return REQUEST_SESSION.get(url, headers=headers, timeout=timeout, **kwargs)
         except Exception as e:
             last_exc = e
             time.sleep(1.2 * (i + 1))
     print(f"safe_request failed: {url} | {last_exc}")
+
     class _DummyResponse:
         status_code = 0
-        def json(self):
-            return {}
         text = ""
 
+        def json(self):
+            return {}
+
     return _DummyResponse()
-
-
-# --- SERVICE BRIDGE ---
-
-SERVICE_BRIDGE_SUBDIR = "service"
-SERVICE_QUEUE_FILENAME = "queue.json"
-SERVICE_STATE_FILENAME = "state.json"
-SERVICE_ACK_FILENAME = "ack.json"
-
-def _service_paths():
-    app = MDApp.get_running_app()
-    base_dir = os.path.join(app.user_data_dir, SERVICE_BRIDGE_SUBDIR) if app else os.path.join(os.path.expanduser("~"), SERVICE_BRIDGE_SUBDIR)
-    os.makedirs(base_dir, exist_ok=True)
-    return {
-        "base": base_dir,
-        "queue": os.path.join(base_dir, SERVICE_QUEUE_FILENAME),
-        "state": os.path.join(base_dir, SERVICE_STATE_FILENAME),
-        "ack": os.path.join(base_dir, SERVICE_ACK_FILENAME),
-    }
-
-def init_service_bridge():
-    return _service_paths()
-
-def queue_service_event(event_type, title, message, key, extra=None):
-    paths = _service_paths()
-    today = datetime.now().date().isoformat()
-    payload = {"date": today, "items": []}
-
-    try:
-        if os.path.exists(paths["queue"]):
-            with open(paths["queue"], "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            if existing.get("date") == today and isinstance(existing.get("items"), list):
-                payload = existing
-    except Exception:
-        pass
-
-    if not key:
-        key = f"{event_type}|{title}|{message}"
-
-    if any(item.get("key") == key for item in payload["items"]):
-        return False
-
-    payload["items"].append({
-        "type": event_type,
-        "key": key,
-        "title": title,
-        "message": message,
-        "extra": extra or {},
-        "ts": datetime.now().isoformat(),
-    })
-
-    try:
-        with open(paths["queue"], "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"queue_service_event error: {e}")
-        return False
-
-def read_service_ack():
-    paths = _service_paths()
-    if not os.path.exists(paths["ack"]):
-        return {}
-    try:
-        with open(paths["ack"], "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-def start_foreground_service():
-    if platform != "android" or AndroidService is None:
-        return False
-    try:
-        service = AndroidService(
-            "Skaner Gieldy USA",
-            "Powiadomienia i alarmy działają w tle"
-        )
-        service.start("Skaner Gieldy USA działa w tle")
-        return True
-    except Exception as e:
-        print(f"start_foreground_service error: {e}")
-        return False
-
 
 def normalize_company_name(symbol, name=None):
     """Ujednolica nazwę spółki, gdy API zwraca sam ticker albo pusty opis."""
@@ -596,15 +522,23 @@ def calc_sma(prices, period, fallback=0.0):
     return sum(prices) / len(prices)
 
 def fetch_top_gainers_by_type(scr_id="day_gainers"):
-    url = f"https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds={scr_id}&count=12"
+    now = time.time()
+    cached = SCREENER_CACHE.get(scr_id)
+    if cached and (now - cached[0]) < 60:
+        return list(cached[1])
+
+    url = f"https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds={scr_id}&count=10"
     try:
         res = safe_request(url, headers=HEADERS, timeout=5)
         if res.status_code == 200:
             result = res.json().get('finance', {}).get('result')
             if result and isinstance(result, list) and len(result) > 0:
                 quotes = result[0].get('quotes', [])
-                return [q['symbol'] for q in quotes if 'symbol' in q]
-    except: pass
+                symbols = [q['symbol'] for q in quotes if 'symbol' in q]
+                SCREENER_CACHE[scr_id] = (now, symbols)
+                return symbols
+    except Exception as e:
+        print(f"fetch_top_gainers_by_type error {scr_id}: {e}")
     return []
 
 
@@ -960,13 +894,20 @@ class ScrollableTab(MDBoxLayout, MDTabsBase):
             self.refresh_data()
             self.is_loaded = True
 
-    def refresh_data(self, *args, **kwargs):
+    def refresh_data_now(self, *args, **kwargs):
         if self._loading:
             return
         self._loading = True
         self.content.clear_widgets()
         self.content.add_widget(MDLabel(text="Pobieranie danych...", halign="center"))
         threading.Thread(target=self._safe_fetch, args=args, kwargs=kwargs, daemon=True).start()
+
+    def refresh_data(self, *args, **kwargs):
+        app = MDApp.get_running_app()
+        if app and hasattr(app, 'enqueue_tab_refresh') and app.should_queue_refresh(self):
+            app.enqueue_tab_refresh(self, *args, **kwargs)
+            return
+        self.refresh_data_now(*args, **kwargs)
 
     def _safe_fetch(self, *args, **kwargs):
         try:
@@ -1008,6 +949,8 @@ class InfoTab(ScrollableTab):
         self.tabs_desc_card = DataCard(text=self._tabs_description_text())
         self.content.add_widget(self.tabs_desc_card)
 
+        self.glossary_header = MDRaisedButton(text=self._glossary_toggle_label(), on_release=lambda x: self.toggle_glossary())
+        self.content.add_widget(self.glossary_header)
         self.glossary_card = DataCard(text=self._glossary_text())
         self.content.add_widget(self.glossary_card)
         Clock.schedule_once(self._cache_glossary_height, 0)
@@ -1015,12 +958,13 @@ class InfoTab(ScrollableTab):
 
         row1 = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(48), spacing=dp(8))
         btn_status = MDRaisedButton(text="Sprawdź Status Rynków", on_release=lambda x: self.refresh_data(force=True))
-        btn_glossary = MDRaisedButton(text="Słowniczek", on_release=lambda x: self.toggle_glossary())
         btn_test = MDRaisedButton(text="TEST Powiadomień", on_release=lambda x: self.run_notification_test(), md_bg_color=(0, 0.5, 0, 1))
         row1.add_widget(btn_status)
-        row1.add_widget(btn_glossary)
         row1.add_widget(btn_test)
         self.control_panel.add_widget(row1)
+
+    def _glossary_toggle_label(self):
+        return "[▼] Słowniczek i opisy zakładek" if not self._glossary_visible else "[▲] Słowniczek i opisy zakładek"
 
     def _tabs_description_text(self):
         return (
@@ -1066,6 +1010,8 @@ class InfoTab(ScrollableTab):
         self.glossary_card.opacity = 1 if self._glossary_visible else 0
         self.glossary_card.disabled = not self._glossary_visible
         self.glossary_card.height = self._glossary_full_height if self._glossary_visible else 0
+        if hasattr(self, 'glossary_header'):
+            self.glossary_header.text = self._glossary_toggle_label()
 
     def run_notification_test(self):
         MDApp.get_running_app().send_notification(title="Test Powiadomienia", message="Test udany!")
@@ -1073,7 +1019,7 @@ class InfoTab(ScrollableTab):
     def _should_refresh_cache(self, force=False):
         return force or not self._status_cache.get("lines")
 
-    def refresh_data(self, *args, **kwargs):
+    def refresh_data_now(self, *args, **kwargs):
         force = kwargs.get('force', False)
         if not self._should_refresh_cache(force=force):
             self._render(self._status_cache.get("lines", []))
@@ -1081,6 +1027,13 @@ class InfoTab(ScrollableTab):
         self.status_container.clear_widgets()
         self.status_container.add_widget(MDLabel(text="Pobieranie statusu rynku...", halign="center"))
         threading.Thread(target=self._safe_fetch, kwargs={"force": force}, daemon=True).start()
+
+    def refresh_data(self, *args, **kwargs):
+        app = MDApp.get_running_app()
+        if app and hasattr(app, 'enqueue_tab_refresh') and app.should_queue_refresh(self):
+            app.enqueue_tab_refresh(self, *args, **kwargs)
+            return
+        self.refresh_data_now(*args, **kwargs)
 
     def _fetch(self, *args, **kwargs):
         try:
@@ -1194,7 +1147,7 @@ class SkanerTab(ScrollableTab):
         bulk_data = fetch_bulk_ticker_data(all_tickers)
 
         app = MDApp.get_running_app()
-        add_cache_items(app, bulk_data, visible_symbols=required)
+        add_cache_items(app, bulk_data, visible_symbols=all_tickers)
 
         signature = tuple(sorted([s for s in all_tickers if s in bulk_data]))
 
@@ -1283,10 +1236,21 @@ class TickerTab(ScrollableTab):
         input_row.add_widget(btn_search)
         self.control_panel.add_widget(input_row)
 
-    def refresh_data(self, sym=None, *args, **kwargs):
-        if not sym: return
+    def refresh_data_now(self, sym=None, *args, **kwargs):
+        if not sym or self._loading:
+            return
+        self._loading = True
         self._msg("Pobieranie danych API... Proszę czekać.", is_card=False)
         threading.Thread(target=self._safe_fetch, args=(sym,), daemon=True).start()
+
+    def refresh_data(self, sym=None, *args, **kwargs):
+        if not sym:
+            return
+        app = MDApp.get_running_app()
+        if app and hasattr(app, 'enqueue_tab_refresh') and app.should_queue_refresh(self):
+            app.enqueue_tab_refresh(self, sym, *args, **kwargs)
+            return
+        self.refresh_data_now(sym, *args, **kwargs)
 
     def _fetch(self, ticker, *args, **kwargs):
         data = fetch_finnhub_ticker_data(ticker)
@@ -1839,7 +1803,7 @@ class CfdShortTab(ScrollableTab):
         tickers = []
         for scr in screeners:
             try:
-                tickers.extend(fetch_top_gainers_by_type(scr)[:12])
+                tickers.extend(fetch_top_gainers_by_type(scr)[:8])
             except Exception as e:
                 print(f"screeners universe error {scr}: {e}")
         tickers.extend(["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX", "AVGO"])
@@ -1856,8 +1820,8 @@ class CfdShortTab(ScrollableTab):
         force = kwargs.get('force', False)
         app = MDApp.get_running_app()
 
-        universe = self._screeners_universe()[:32]
-        cfd_universe = self._cfd_universe()[:18]
+        universe = self._screeners_universe()[:24]
+        cfd_universe = self._cfd_universe()[:14]
         required = list(dict.fromkeys(universe + cfd_universe))
         is_cache_fresh = app.cache_time and (datetime.now() - app.cache_time).total_seconds() < 180 and not force
 
@@ -1865,7 +1829,7 @@ class CfdShortTab(ScrollableTab):
             bulk_data = {k: app.shared_cache[k] for k in required if k in app.shared_cache}
         else:
             bulk_data = fetch_bulk_ticker_data(required)
-            add_cache_items(app, bulk_data, visible_symbols=required)
+            add_cache_items(app, bulk_data, visible_symbols=all_tickers)
 
         a_candidates = []
         b_candidates = []
@@ -2056,6 +2020,11 @@ class StockScannerPro(MDApp):
         self._scheduler_running = False
         self._scheduled_slots = set()
         self._scheduler_lock = threading.Lock()
+        self._refresh_queue = deque()
+        self._refresh_queue_lock = threading.Lock()
+        self._refresh_active = False
+        self._refresh_active_tab = None
+        self._refresh_spacing = 1.0
         self.theme_cls.theme_style = "Light"
         self.theme_cls.primary_palette = "Teal"
 
@@ -2088,7 +2057,9 @@ class StockScannerPro(MDApp):
             self.tabs_instances[5].load_stored_data()
 
         self.app_ready = True
-        Clock.schedule_once(lambda dt: self.tabs_instances[1].load_data_if_needed(), 0.5)
+        for idx, tab in enumerate(self.tabs_instances):
+            if hasattr(tab, 'load_data_if_needed'):
+                Clock.schedule_once(lambda dt, t=tab: t.load_data_if_needed(), 0.6 * idx)
         self._start_background_scheduler()
 
     def _start_background_scheduler(self):
@@ -2114,11 +2085,61 @@ class StockScannerPro(MDApp):
                 return tab
         return None
 
+    def should_queue_refresh(self, tab):
+        return not isinstance(tab, InfoTab)
+
+    def enqueue_tab_refresh(self, tab, *args, **kwargs):
+        if tab is None:
+            return
+        with self._refresh_queue_lock:
+            if self._refresh_active and self._refresh_active_tab is tab:
+                return
+            if any(item[0] is tab for item in self._refresh_queue):
+                return
+            self._refresh_queue.append((tab, args, kwargs))
+        Clock.schedule_once(self._drain_refresh_queue, 0)
+
+    def _drain_refresh_queue(self, dt=0):
+        if self._refresh_active:
+            return
+        with self._refresh_queue_lock:
+            if not self._refresh_queue:
+                return
+            tab, args, kwargs = self._refresh_queue.popleft()
+            self._refresh_active = True
+            self._refresh_active_tab = tab
+        try:
+            if hasattr(tab, 'refresh_data_now'):
+                tab.refresh_data_now(*args, **kwargs)
+            else:
+                tab.refresh_data(*args, **kwargs)
+        except Exception as e:
+            print(f"Refresh queue start error: {e}")
+            self._finish_refresh_queue()
+            return
+        Clock.schedule_once(self._monitor_refresh_queue, self._refresh_spacing)
+
+    def _monitor_refresh_queue(self, dt=0):
+        tab = self._refresh_active_tab
+        if tab is None:
+            self._finish_refresh_queue()
+            return
+        if getattr(tab, '_loading', False):
+            Clock.schedule_once(self._monitor_refresh_queue, 0.4)
+            return
+        self._finish_refresh_queue()
+        Clock.schedule_once(self._drain_refresh_queue, self._refresh_spacing)
+
+    def _finish_refresh_queue(self):
+        with self._refresh_queue_lock:
+            self._refresh_active = False
+            self._refresh_active_tab = None
+
     def _maybe_fire_scheduled_updates(self):
         now = datetime.now()
         if now.weekday() >= 5:
             return
-        if now.hour not in [11, 13, 15] or now.minute > 4:
+        if now.hour not in [11, 12, 13, 14, 15] or now.minute > 4:
             return
         slot = now.strftime('%Y-%m-%d %H')
         with self._scheduler_lock:
