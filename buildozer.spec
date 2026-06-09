@@ -1,7 +1,7 @@
 [app]
 
-title = SkanerGieldyUSA
-package.name = skanergieldy
+title = SkanerGieldyPro
+package.name = skanergieldypro
 package.domain = org.test
 
 source.dir = .
