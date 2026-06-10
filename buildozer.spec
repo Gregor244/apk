@@ -1,5 +1,5 @@
 [app]
-title = SkanerGieldyPro
+title = Skanergieldypro
 package.name = skanergieldypro
 package.domain = org.test
 
@@ -8,7 +8,7 @@ source.include_exts = py,png,jpg,jpeg,kv,atlas,json
 
 version = 1.2
 
-requirements = kivy==2.3.0,kivymd==1.2.0,pillow,requests,plyer,certifi,urllib3,chardet,idna
+requirements = hostpython3==3.11.8,python3==3.11.8,kivy==2.3.0,kivymd==1.2.0,pillow,requests,plyer,certifi,urllib3,chardet,idna,
 
 orientation = portrait
 fullscreen = 0
