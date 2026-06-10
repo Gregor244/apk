@@ -6,6 +6,7 @@ import certifi
 import webbrowser
 import time
 import re
+import gc
 import copy
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -55,11 +56,16 @@ if platform == 'android':
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"}
 FINNHUB_KEY = "d82t3s1r01ql4onfbbngd82t3s1r01ql4onfbbo0"
 
+ANALYSIS_CACHE = {}
+ANALYSIS_CACHE_TTL = 60  # sek
+
 IS_GITHUB = os.getenv("GITHUB_ACTIONS") == "true"
 
 CACHE_LOCK = threading.Lock()
 
 MAX_CACHE_SIZE = 250
+
+MAX_TICKERS_PER_SCAN = 80
 
 REQUEST_CACHE = {}
 
@@ -97,6 +103,8 @@ PL_DAYS = {
 }
 
 # --- NARZĘDZIA POMOCNICZE ---
+def safe_ui(callback, *args, **kwargs):
+    Clock.schedule_once(lambda dt: callback(*args, **kwargs))
 
 def format_market_cap(val):
     try:
@@ -211,7 +219,52 @@ def extract_intraday_session_price(chart_result, session_state):
         pass
     return 0.0
 
+def get_cached_analysis(sym, closes, price, vol, avg_vol):
+    now = time.time()
+    key = sym
 
+    cached = ANALYSIS_CACHE.get(key)
+    if cached and now - cached["ts"] < ANALYSIS_CACHE_TTL:
+        return cached["data"]
+
+    sma14 = calc_sma(closes, 14, price)
+    sma30 = calc_sma(closes, 30, price)
+    sma50 = calc_sma(closes, 50, price)
+    sma90 = calc_sma(closes, 90, price)
+
+    rsi = calculate_rsi(closes, 14)
+
+    macd, sig, _ = calculate_macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
+    hist = calculate_histogram(macd, sig)
+
+    score, signal_text, signal_color = calculate_signal_strength(
+        rsi, macd, sig,
+        hist=hist,
+        price=price,
+        sma14=sma14,
+        sma30=sma30,
+        sma90=sma90,
+        volume=vol,
+        avg_volume=avg_vol
+    )
+
+    result = {
+        "sma14": sma14,
+        "sma30": sma30,
+        "sma50": sma50,
+        "sma90": sma90,
+        "rsi": rsi,
+        "macd": macd,
+        "sig": sig,
+        "hist": hist,
+        "score": score,
+        "signal_text": signal_text,
+        "signal_color": signal_color,
+    }
+
+    ANALYSIS_CACHE[key] = {"ts": now, "data": result}
+    return result
+    
 _THREAD_LOCAL = threading.local()
 
 def _get_http_session():
@@ -497,27 +550,30 @@ def get_session_snapshot(data):
 
 
 def add_cache_items(app, items: dict, visible_symbols=None, keep_symbols=None):
-    visible_symbols = list(dict.fromkeys([s for s in (visible_symbols or items.keys()) if s]))
-    keep_symbols = list(dict.fromkeys([s for s in (keep_symbols or []) if s]))
+    visible_symbols = list(dict.fromkeys(visible_symbols or items.keys()))
+    keep_symbols = list(dict.fromkeys(keep_symbols or []))
 
     with CACHE_LOCK:
-        old_cache = dict(getattr(app, "shared_cache", {}))
-        new_cache = {}
+        old = getattr(app, "shared_cache", {})
+        new = {}
 
         for sym in visible_symbols:
             if sym in items:
-                new_cache[sym] = merge_with_cache(sym, items[sym], old_cache)
-            elif sym in old_cache:
-                new_cache[sym] = old_cache[sym]
+                new[sym] = items[sym]
+            elif sym in old:
+                new[sym] = old[sym]
 
         for sym in keep_symbols:
-            if sym in old_cache and sym not in new_cache:
-                new_cache[sym] = old_cache[sym]
+            if sym in old:
+                new[sym] = old[sym]
 
-        app.shared_cache = new_cache
+        app.shared_cache = new
+
+        # 🔥 Android RAM SAFE LIMIT
         if len(app.shared_cache) > MAX_CACHE_SIZE:
-            keys = list(app.shared_cache.keys())[-MAX_CACHE_SIZE:]
-            app.shared_cache = {k: app.shared_cache[k] for k in keys}
+            trimmed = list(app.shared_cache.items())[-MAX_CACHE_SIZE:]
+            app.shared_cache = dict(trimmed)
+
         app.cache_time = datetime.now()
 
 
@@ -661,7 +717,7 @@ def safe_request(url, timeout=8, retries=MAX_RETRIES, headers=None, **kwargs):
 
             if response.status_code in (429, 500, 502, 503, 504):
 
-                time.sleep(1.2 * (i + 1))
+                time.sleep(min(1.2 * (i + 1), 2.5))
                 continue
 
             return response
@@ -733,6 +789,8 @@ SERVICE_ACK_FILENAME = "ack.json"
 
 def _service_paths():
     app = MDApp.get_running_app()
+        if not app:
+        return
     base_dir = os.path.join(app.user_data_dir, SERVICE_BRIDGE_SUBDIR) if app else os.path.join(os.path.expanduser("~"), SERVICE_BRIDGE_SUBDIR)
     os.makedirs(base_dir, exist_ok=True)
     return {
@@ -1461,6 +1519,8 @@ class ScrollableTab(MDBoxLayout, MDTabsBase):
 
     def refresh_data(self, *args, **kwargs):
         app = MDApp.get_running_app()
+        if not app:
+        return
         if app and hasattr(app, 'schedule_tab_refresh'):
             app.schedule_tab_refresh(self, args=args, kwargs=kwargs)
             return
@@ -1583,6 +1643,8 @@ class InfoTab(ScrollableTab):
         app = MDApp.get_running_app()
         if app:
             app.send_notification(title="Test Powiadomienia", message="Test udany!")
+            except Exception:
+                pass
 
     def _should_refresh_cache(self, force=False):
         return force or not self._status_cache.get("lines")
@@ -1631,6 +1693,7 @@ class InfoTab(ScrollableTab):
         self.status_container.add_widget(MDLabel(text=color_wrap(f"Ostatnia aktualizacja: {getattr(self, 'last_update_text', timestamp_text())}", "#888888"), markup=True, size_hint_y=None, height=dp(24), halign="left"))
         for line in lines:
             self.status_container.add_widget(DataCard(text=line))
+            gc.collect()
 
 class SkanerTab(ScrollableTab):
 
@@ -1713,7 +1776,10 @@ class SkanerTab(ScrollableTab):
 
                 with open(path, "r", encoding="utf-8") as f:
 
-                    saved = json.load(f)
+                    try:
+                        saved = json.load(f)
+                        except json.JSONDecodeError:
+                        saved = []
 
                     if isinstance(saved, list) and saved:
                         self.static_tickers = saved
@@ -1726,6 +1792,8 @@ class SkanerTab(ScrollableTab):
     def save_stored_data(self):
 
         app = MDApp.get_running_app()
+            if not app:
+            return
 
         path = os.path.join(
             app.user_data_dir,
@@ -1796,232 +1864,99 @@ class SkanerTab(ScrollableTab):
 
     # =========================================================
 
-    def _fetch(self):
-
+    def _fetch(self, *args, **kwargs):
+    def worker():
         cards_data = []
 
         try:
-
-            gainers_pre = fetch_top_gainers_by_type(
-                "pre_market_gainers"
-            )[:6]
-
-            gainers_open = fetch_top_gainers_by_type(
-                "day_gainers"
-            )[:6]
-
-            gainers_post = fetch_top_gainers_by_type(
-                "after_hours_gainers"
-            )[:6]
-
+            gainers_pre = fetch_top_gainers_by_type("pre_market_gainers")[:10]
+            gainers_open = fetch_top_gainers_by_type("day_gainers")[:10]
+            gainers_post = fetch_top_gainers_by_type("after_hours_gainers")[:10]
         except Exception as e:
-
             print(f"Skaner screener error: {e}")
-
-            gainers_pre = []
-            gainers_open = []
-            gainers_post = []
+            gainers_pre, gainers_open, gainers_post = [], [], []
 
         pre_set = set(gainers_pre)
-
         day_set = set(gainers_open)
-
         post_set = set(gainers_post)
 
         all_tickers = list(dict.fromkeys(
-            self.static_tickers +
-            gainers_pre +
-            gainers_open +
-            gainers_post
+            self.static_tickers + gainers_pre + gainers_open + gainers_post
         ))
 
-        # ===== ANDROID SAFE LIMIT =====
-        all_tickers = all_tickers[:25]
+        bulk_data = fetch_bulk_ticker_data(all_tickers)
 
         app = MDApp.get_running_app()
+        add_cache_items(app, bulk_data, visible_symbols=all_tickers)
 
-        bulk_data = {}
-
-        # ===== BATCH DOWNLOAD =====
-        for chunk in chunked_list(all_tickers, 5):
-
-            try:
-
-                partial = fetch_bulk_ticker_data(chunk)
-
-                if partial:
-                    bulk_data.update(partial)
-
-            except Exception as e:
-                print(f"bulk chunk error: {e}")
-
-            time.sleep(0.25)
-
-        add_cache_items(
-            app,
-            bulk_data,
-            visible_symbols=all_tickers
-        )
-
-        signature = tuple(sorted([
-            s for s in all_tickers
-            if s in bulk_data
-        ]))
+        signature = tuple(sorted([s for s in all_tickers if s in bulk_data]))
 
         for sym in all_tickers:
+            data = app.shared_cache.get(sym)
+            if not data:
+                continue
 
+            comp_name = normalize_company_name(sym, data.get("name", sym))
+            session_info = get_session_snapshot(data)
+
+            active_price = session_info["price"]
+            chg_val = session_info["change_amt"]
+            chg_pct = session_info["change_pct"]
+            session_label = session_info["session_label"]
+
+            source_tag = session_source_tag(
+                session_info["session"], sym,
+                pre_set, day_set, post_set
+            )
+
+            closes = data.get('closes', [])
+
+            macd_v, sig_v, _ = calculate_macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
+            hist = calculate_histogram(macd_v, sig_v)
+            rsi_val = calculate_rsi(closes[-50:], 14) if len(closes) > 14 else 50.0
+
+            sma14 = calc_sma(closes, 14, active_price)
+            sma50 = calc_sma(closes, 50, active_price)
+
+            vol_val = data.get('vol', 0)
+            avg_vol_val = data.get('avg_vol', 0)
+
+            trade_score, trade_signal_text, trade_signal_color = calculate_signal_strength(
+                rsi_val, macd_v, sig_v,
+                hist=hist,
+                price=active_price,
+                sma14=sma14,
+                sma30=calc_sma(closes, 30, active_price),
+                sma90=calc_sma(closes, 90, active_price),
+                volume=vol_val,
+                avg_volume=avg_vol_val
+            )
+
+            txt = (
+                f"{session_label} {source_tag} [b]{comp_name}[/b]\n"
+                f"Cena: [b]{active_price:.2f} USD[/b] "
+                f"([color={'#00AA00' if chg_val >= 0 else '#FF0000'}]"
+                f"{chg_val:+.2f} | {chg_pct:+.2f}%[/color])\n"
+                f"RSI: {rsi_val:.1f} | MACD: {macd_v:.2f} | Hist: {hist:.3f}\n"
+                f"SMA14: {sma14:.2f} | SMA50: {sma50:.2f}\n"
+                f"Sygnał: [b]{trade_signal_text}[/b]"
+            )
+
+            cards_data.append(txt)
+
+        if signature and signature != self._last_scan_signature:
+            self._last_scan_signature = signature
             try:
-
-                data = app.shared_cache.get(sym)
-
-                if not data:
-                    continue
-
-                comp_name = normalize_company_name(
-                    sym,
-                    data.get("name", sym)
+                app.send_notification(
+                    "Skaner",
+                    f"Zaktualizowano {len(signature)} spółek"
                 )
+            except:
+                pass
 
-                session_info = get_session_snapshot(data)
+        Clock.schedule_once(lambda dt: self._render(cards_data))
 
-                session = session_info["session"]
-
-                active_price = session_info["price"]
-
-                chg_val = session_info["change_amt"]
-
-                chg_pct = session_info["change_pct"]
-
-                session_label = session_info["session_label"]
-
-                source_tag = session_source_tag(
-                    session,
-                    sym,
-                    pre_set,
-                    day_set,
-                    post_set
-                )
-
-                closes = data.get('closes', [])
-
-                macd_v, sig_v, _ = (
-                    calculate_macd(closes)
-                    if len(closes) > 35
-                    else (0.0, 0.0, 0.0)
-                )
-
-                hist = calculate_histogram(
-                    macd_v,
-                    sig_v
-                )
-
-                rsi_val = (
-                    calculate_rsi(closes, 14)
-                    if closes else 50.0
-                )
-
-                rsi_str = (
-                    color_wrap(
-                        f"{rsi_val:.1f} (Wyprzedanie)",
-                        "#00AA00"
-                    ) if rsi_val <= 35 else
-                    color_wrap(
-                        f"{rsi_val:.1f} (Wykupienie)",
-                        "#FF0000"
-                    ) if rsi_val >= 65 else
-                    color_wrap(
-                        f"{rsi_val:.1f} (Neutralny)",
-                        "#777777"
-                    )
-                )
-
-                macd_str = color_wrap(
-                    f"{macd_v:.2f}",
-                    color_for_macd(macd_v, sig_v)
-                )
-
-                hist_str = format_histogram(hist)
-
-                vol_val = data.get('vol', 0)
-
-                avg_vol_val = data.get('avg_vol', 0)
-
-                cap_str = format_market_cap(
-                    data.get('market_cap', 0)
-                )
-
-                pe_str = str(
-                    data.get('pe', 'N/A')
-                )
-
-                trade_score, trade_signal_text, trade_signal_color = calculate_signal_strength(
-                    rsi_val,
-                    macd_v,
-                    sig_v,
-                    hist=hist,
-                    price=active_price,
-                    sma14=calc_sma(closes, 14, active_price),
-                    sma30=calc_sma(closes, 30, active_price),
-                    sma90=calc_sma(closes, 90, active_price),
-                    volume=vol_val,
-                    avg_volume=avg_vol_val
-                )
-
-                trade_signal = color_wrap(
-                    f"[b]{trade_signal_text}[/b]",
-                    trade_signal_color
-                )
-
-                sma14 = calc_sma(
-                    closes,
-                    14,
-                    active_price
-                )
-
-                sma50 = calc_sma(
-                    closes,
-                    50,
-                    active_price
-                )
-
-                txt = (
-                    f"{session_label} "
-                    f"{source_tag} "
-                    f"[color=#008080][b]{comp_name}[/b][/color]\n"
-
-                    f"Cena: [b]{active_price:.2f} USD[/b] "
-                    f"([color={'#00AA00' if chg_val >= 0 else '#FF0000'}]"
-                    f"{chg_val:+.2f} USD | {chg_pct:+.2f}%[/color])\n"
-
-                    f"Wolumen: {vol_val:,}\n"
-
-                    f"Kapitalizacja: {cap_str} | "
-                    f"P/E: [b]{pe_str}[/b]\n"
-
-                    f"RSI: {rsi_str}\n"
-
-                    f"MACD: {macd_str}\n"
-
-                    f"Histogram: {hist_str}\n"
-
-                    f"SMA14: {format_price_line(sma14, active_price)}\n"
-
-                    f"SMA50: {format_price_line(sma50, active_price)}\n"
-
-                    f"Sygnał: {trade_signal}"
-                )
-
-                cards_data.append(txt)
-
-            except Exception as e:
-
-                print(f"Skaner card error {sym}: {e}")
-
-        self.last_update_text = timestamp_text()
-
-        Clock.schedule_once(
-            lambda dt: self._render(cards_data)
-        )
+    threading.Thread(target=worker, daemon=True).start()
 
     # =========================================================
 
@@ -2042,6 +1977,7 @@ class SkanerTab(ScrollableTab):
                 halign="left"
             )
         )
+        gc.collect()
 
         # ===== ANDROID SAFE RENDER =====
         for card in cards[:25]:
@@ -2241,6 +2177,8 @@ class KatalizatoryTab(ScrollableTab):
 
         try:
             app = MDApp.get_running_app()
+                if not app:
+                return
             watch_list = []
             if hasattr(app, 'tabs_instances'):
                 skaner = next((t for t in app.tabs_instances if isinstance(t, SkanerTab)), None)
@@ -2412,6 +2350,7 @@ class KatalizatoryTab(ScrollableTab):
             self.content.add_widget(MDLabel(text=f"[b][color=#ff8c00]— KALENDARZ WYNIKÓW: {day} —[/color][/b]", markup=True, size_hint_y=None, height=dp(40)))
             for ev in events:
                 self.content.add_widget(DataCard(text=ev))
+                gc.collect()
 
 
 class NewsTab(ScrollableTab):
@@ -2424,6 +2363,7 @@ class NewsTab(ScrollableTab):
 
     def _store_path(self):
         app = MDApp.get_running_app()
+        if not app:
         return os.path.join(app.user_data_dir, "pr_news_store.json") if app else None
 
     def _load_daily_items(self):
@@ -2469,6 +2409,8 @@ class NewsTab(ScrollableTab):
 
     def _fetch(self, *args):
         app = MDApp.get_running_app()
+        if not app:
+        return
         watch_list = []
         if hasattr(app, 'tabs_instances'):
             skaner = next((t for t in app.tabs_instances if isinstance(t, SkanerTab)), None)
@@ -2512,9 +2454,11 @@ class NewsTab(ScrollableTab):
                     )
                     if not queued:
                         try:
+                            if app:
                             app.send_notification(f"PR / Catalyst: {ticker}", title)
                         except Exception as e:
                             print(f"PR notification error: {e}")
+                            pass
 
         # PR / watchlist news
         if watch_list:
@@ -2568,6 +2512,8 @@ class NewsTab(ScrollableTab):
 
     def _render_news(self):
         app = MDApp.get_running_app()
+        if not app:
+        return
         self.content.clear_widgets()
         self.content.add_widget(MDLabel(text=color_wrap(f"Ostatnia aktualizacja: {getattr(self, 'last_update_text', timestamp_text())}", "#888888"), markup=True, size_hint_y=None, height=dp(24), halign="left"))
         self.content.add_widget(MDLabel(text="[b][color=#00FFFF]📰 AKTUALNOŚCI I NOWOŚCI RYNKOWE[/color][/b]", markup=True, size_hint_y=None, height=dp(40)))
@@ -2659,10 +2605,12 @@ def _fetch(self, *args, **kwargs):
     force = kwargs.get('force', False)
 
     app = MDApp.get_running_app()
+    if not app:
+    return
 
     universe = self._get_universe(force=force)[:60]
 
-    cfd_universe = self._cfd_universe()[:18]
+    cfd_universe = self._cfd_universe()[:80]
 
     required = list(dict.fromkeys(
         universe + cfd_universe
@@ -2737,7 +2685,7 @@ def _fetch(self, *args, **kwargs):
 
         try:
 
-            data = app.shared_cache.get(sym)
+            cache_snapshot = dict(app.shared_cache)
 
             if not data:
                 continue
@@ -2757,7 +2705,7 @@ def _fetch(self, *args, **kwargs):
 
             comp_name = normalize_company_name(
                 sym,
-                data.get("name", sym)
+                data = cache_snapshot.get(sym)
             )
 
             vol = int(
@@ -3026,6 +2974,7 @@ def _fetch(self, *args, **kwargs):
             self.content.add_widget(MDLabel(text=f"[color={color}][b]SEKCJA {sec_name}[/b][/color]", markup=True, size_hint_y=None, height=dp(40)))
             for item in items:
                 self.content.add_widget(DataCard(text=item))
+                gc.collect()
 
 class StockScannerPro(MDApp):
     def build(self):
