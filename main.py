@@ -56,16 +56,40 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 FINNHUB_KEY = "d82t3s1r01ql4onfbbngd82t3s1r01ql4onfbbo0"
 
 IS_GITHUB = os.getenv("GITHUB_ACTIONS") == "true"
+
 CACHE_LOCK = threading.Lock()
+
 MAX_CACHE_SIZE = 250
+
 REQUEST_CACHE = {}
+
 REQUEST_CACHE_LOCK = threading.Lock()
+
+LAST_REQUEST_TIME = {}
+
+FAILED_REQUESTS = {}
+
 REQUEST_CACHE_TTL = {
     "screener": 120,
     "ticker": 90,
     "finnhub": 120,
     "company": 180,
 }
+
+# ===== APK / ANDROID SAFE SETTINGS =====
+
+SCAN_POOL = ThreadPoolExecutor(
+    max_workers=4,
+    thread_name_prefix="apk_scanner"
+)
+
+SCAN_LOCK = threading.Lock()
+
+ACTIVE_SCAN = False
+
+REQUEST_DELAY = 0.12
+
+MAX_RETRIES = 2
 
 PL_DAYS = {
     "Monday": "PONIEDZIAŁEK", "Tuesday": "WTOREK", "Wednesday": "ŚRODA",
@@ -364,47 +388,101 @@ def calculate_signal_strength(rsi, macd, signal_line, hist=None, price=None, sma
     return score, label, color
 
 
-
-
-
 def get_session_snapshot(data):
-    market_state = str(data.get("market_state", "CLOSED") or "CLOSED").upper().strip()
+
     regular_price = safe_number(data.get("price", 0.0), 0.0)
+
     prev_close = safe_number(data.get("prev_close", 0.0), 0.0)
+
     pre_price = safe_number(data.get("pre_price", 0.0), 0.0)
+
     post_price = safe_number(data.get("post_price", 0.0), 0.0)
+
     session_price = safe_number(data.get("session_price", 0.0), 0.0)
 
-    # Session derived from US market hours to avoid showing MARKET OPEN when market is already closed.
-    hint = str(data.get("session_state", "") or get_pl_session_hint()).upper().strip()
+    hint = str(
+        data.get("session_state", "") or get_pl_session_hint()
+    ).upper().strip()
 
+    session = "CLOSED"
+
+    session_label = "[color=#FF9900][b][ZAMKNIĘTY][/b][/color]"
+
+    # ===== PRE =====
     if hint == "PRE":
-        session = "PRE"
-        session_label = "[color=#0000FF][b][PRE-MARKET][/b][/color]"
-        price = pre_price if pre_price > 0 else session_price if session_price > 0 else regular_price if regular_price > 0 else prev_close
-    elif hint == "POST":
-        session = "POST"
-        session_label = "[color=#800080][b][POST-MARKET][/b][/color]"
-        price = post_price if post_price > 0 else session_price if session_price > 0 else regular_price if regular_price > 0 else prev_close
-    elif hint == "REGULAR":
-        session = "REGULAR"
-        session_label = "[color=#00AA00][b][MARKET OPEN][/b][/color]"
-        price = session_price if session_price > 0 else regular_price if regular_price > 0 else prev_close
-    else:
-        session = "CLOSED"
-        session_label = "[color=#FF9900][b][ZAMKNIĘTY][/b][/color]"
-        price = session_price if session_price > 0 else post_price if post_price > 0 else regular_price if regular_price > 0 else prev_close
 
-    if price <= 0 and prev_close > 0:
+        session = "PRE"
+
+        session_label = "[color=#0000FF][b][PRE-MARKET][/b][/color]"
+
+        if pre_price > 0:
+            price = pre_price
+        elif session_price > 0:
+            price = session_price
+        elif regular_price > 0:
+            price = regular_price
+        else:
+            price = prev_close
+
+    # ===== REGULAR =====
+    elif hint == "REGULAR":
+
+        session = "REGULAR"
+
+        session_label = "[color=#00AA00][b][MARKET OPEN][/b][/color]"
+
+        if regular_price > 0:
+            price = regular_price
+        elif session_price > 0:
+            price = session_price
+        else:
+            price = prev_close
+
+    # ===== POST =====
+    elif hint == "POST":
+
+        session = "POST"
+
+        session_label = "[color=#800080][b][POST-MARKET][/b][/color]"
+
+        if post_price > 0:
+            price = post_price
+        elif regular_price > 0:
+            price = regular_price
+        elif session_price > 0:
+            price = session_price
+        else:
+            price = prev_close
+
+    # ===== CLOSED =====
+    else:
+
+        session = "CLOSED"
+
+        session_label = "[color=#FF9900][b][ZAMKNIĘTY][/b][/color]"
+
+        # KLUCZOWA POPRAWKA
+        if regular_price > 0:
+            price = regular_price
+        else:
+            price = prev_close
+
+    if price <= 0:
         price = prev_close
 
-    # Always recalc off the active session price to avoid stale/zero changes from quote endpoints.
     if prev_close > 0 and price > 0:
+
         change_amt = price - prev_close
-        change_pct = (change_amt / prev_close) * 100 if prev_close else 0.0
+
+        change_pct = (
+            (change_amt / prev_close) * 100
+        )
+
     else:
-        change_amt = safe_number(data.get("change_amt", 0.0), 0.0)
-        change_pct = safe_number(data.get("change_pct", 0.0), 0.0)
+
+        change_amt = 0.0
+
+        change_pct = 0.0
 
     return {
         "session": session,
@@ -414,6 +492,9 @@ def get_session_snapshot(data):
         "change_pct": change_pct,
         "prev_close": prev_close,
     }
+
+
+
 
 def add_cache_items(app, items: dict, visible_symbols=None, keep_symbols=None):
     visible_symbols = list(dict.fromkeys([s for s in (visible_symbols or items.keys()) if s]))
@@ -533,27 +614,115 @@ def is_merger_mna_title(title):
         "exploring sale", "explores sale", "received a bid", "considering sale"
     ])
 
+def safe_request(url, timeout=8, retries=MAX_RETRIES, headers=None, **kwargs):
 
-def safe_request(url, timeout=5, retries=3, headers=None, **kwargs):
     headers = headers or HEADERS
-    last_exc = None
+
     verify = kwargs.pop("verify", certifi.where())
+
     session = _get_http_session()
+
+    last_exc = None
+
     for i in range(retries):
+
         try:
-            return session.get(url, headers=headers, timeout=timeout, verify=verify, **kwargs)
+
+            now = time.time()
+
+            host = "default"
+
+            try:
+                host = url.split("/")[2]
+            except Exception:
+                pass
+
+            with REQUEST_CACHE_LOCK:
+
+                last_time = LAST_REQUEST_TIME.get(host, 0)
+
+                diff = now - last_time
+
+                if diff < REQUEST_DELAY:
+                    time.sleep(REQUEST_DELAY - diff)
+
+                LAST_REQUEST_TIME[host] = time.time()
+
+            response = session.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                verify=verify,
+                **kwargs
+            )
+
+            if response.status_code == 200:
+                return response
+
+            if response.status_code in (429, 500, 502, 503, 504):
+
+                time.sleep(1.2 * (i + 1))
+                continue
+
+            return response
+
         except Exception as e:
+
             last_exc = e
-            time.sleep(1.2 * (i + 1))
-    print(f"safe_request failed: {url} | {last_exc}")
+
+            time.sleep(1.0 * (i + 1))
+
+    print(f"[SAFE REQUEST ERROR] {url} | {last_exc}")
+
     class _DummyResponse:
+
         status_code = 0
+
+        text = ""
+
         def json(self):
             return {}
-        text = ""
 
     return _DummyResponse()
 
+def cached_get(url, ttl=60, timeout=8):
+
+    now = time.time()
+
+    with REQUEST_CACHE_LOCK:
+
+        item = REQUEST_CACHE.get(url)
+
+        if item:
+
+            ts, response = item
+
+            if now - ts < ttl:
+                return response
+
+    response = safe_request(
+        url,
+        timeout=timeout
+    )
+
+    with REQUEST_CACHE_LOCK:
+
+        REQUEST_CACHE[url] = (now, response)
+
+        # Ochrona RAM Android
+        if len(REQUEST_CACHE) > 300:
+
+            sorted_items = sorted(
+                REQUEST_CACHE.items(),
+                key=lambda x: x[1][0]
+            )
+
+            REQUEST_CACHE.clear()
+
+            for k, v in sorted_items[-150:]:
+                REQUEST_CACHE[k] = v
+
+    return response
 
 # --- SERVICE BRIDGE ---
 
@@ -1288,7 +1457,7 @@ class ScrollableTab(MDBoxLayout, MDTabsBase):
         self._loading = True
         self.content.clear_widgets()
         self.content.add_widget(MDLabel(text="Pobieranie danych...", halign="center"))
-        threading.Thread(target=self._safe_fetch, args=args, kwargs=kwargs, daemon=True).start()
+        SCAN_POOL.submit(target=self._safe_fetch, args=args, kwargs=kwargs, daemon=True).start()
 
     def refresh_data(self, *args, **kwargs):
         app = MDApp.get_running_app()
@@ -1425,7 +1594,7 @@ class InfoTab(ScrollableTab):
             return
         self.status_container.clear_widgets()
         self.status_container.add_widget(MDLabel(text="Pobieranie statusu rynku...", halign="center"))
-        threading.Thread(target=self._safe_fetch, kwargs={"force": force}, daemon=True).start()
+        SCAN_POOL.submit(target=self._safe_fetch, kwargs={"force": force}, daemon=True).start()
 
     def _fetch(self, *args, **kwargs):
         try:
@@ -1464,155 +1633,429 @@ class InfoTab(ScrollableTab):
             self.status_container.add_widget(DataCard(text=line))
 
 class SkanerTab(ScrollableTab):
+
     def __init__(self, **kw):
+
         kw['title'] = "Skaner"
+
         super().__init__(**kw)
-        self.static_tickers = ["AAPL", "MSFT", "NVDA", "AMD", "SNDK", "MU", "AMZN", "ARM", "MRVL", "NOW", "QUCY"]
+
+        self.static_tickers = [
+            "AAPL", "MSFT", "NVDA", "AMD",
+            "SNDK", "MU", "AMZN", "ARM",
+            "MRVL", "NOW", "QUCY"
+        ]
+
         self.control_panel.height = dp(115)
+
         self._last_scan_signature = None
+
+        self.scan_running = False
 
         self.load_stored_data()
 
-        input_row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(48), spacing=dp(8))
-        self.input_field = MDTextField(hint_text="Wpisz ticker (np. TSLA)", size_hint_x=0.66, mode="rectangle")
-        btn_add = MDRaisedButton(text="+", size_hint_x=0.17, on_release=self.add_ticker)
-        btn_rem = MDRaisedButton(text="-", size_hint_x=0.17, on_release=self.remove_ticker)
+        input_row = MDBoxLayout(
+            orientation="horizontal",
+            size_hint_y=None,
+            height=dp(48),
+            spacing=dp(8)
+        )
+
+        self.input_field = MDTextField(
+            hint_text="Wpisz ticker (np. TSLA)",
+            size_hint_x=0.66,
+            mode="rectangle"
+        )
+
+        btn_add = MDRaisedButton(
+            text="+",
+            size_hint_x=0.17,
+            on_release=self.add_ticker
+        )
+
+        btn_rem = MDRaisedButton(
+            text="-",
+            size_hint_x=0.17,
+            on_release=self.remove_ticker
+        )
 
         input_row.add_widget(self.input_field)
         input_row.add_widget(btn_add)
         input_row.add_widget(btn_rem)
 
         self.control_panel.add_widget(input_row)
-        self.control_panel.add_widget(MDRaisedButton(text="Skanuj rynki + Wskaźniki", on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
+
+        self.scan_btn = MDRaisedButton(
+            text="Skanuj rynki + Wskaźniki",
+            on_release=lambda x: self.refresh_data(),
+            pos_hint={"center_x": 0.5}
+        )
+
+        self.control_panel.add_widget(self.scan_btn)
+
+    # =========================================================
 
     def load_stored_data(self):
+
         app = MDApp.get_running_app()
-        if not app: return
-        path = os.path.join(app.user_data_dir, "skaner_tickers.json")
+
+        if not app:
+            return
+
+        path = os.path.join(
+            app.user_data_dir,
+            "skaner_tickers.json"
+        )
+
         if os.path.exists(path):
+
             try:
+
                 with open(path, "r", encoding="utf-8") as f:
+
                     saved = json.load(f)
-                    if isinstance(saved, list) and saved: self.static_tickers = saved
+
+                    if isinstance(saved, list) and saved:
+                        self.static_tickers = saved
+
             except Exception as e:
                 print(f"load_stored_data skaner: {e}")
 
+    # =========================================================
+
     def save_stored_data(self):
+
         app = MDApp.get_running_app()
-        path = os.path.join(app.user_data_dir, "skaner_tickers.json")
+
+        path = os.path.join(
+            app.user_data_dir,
+            "skaner_tickers.json"
+        )
+
         try:
-            with open(path, "w", encoding="utf-8") as f: json.dump(self.static_tickers, f)
+
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.static_tickers, f)
+
         except Exception as e:
             print(f"save_stored_data skaner: {e}")
 
+    # =========================================================
+
     def add_ticker(self, *a):
+
         t = self.input_field.text.strip().upper()
+
         self.input_field.text = ""
+
         if t and t not in self.static_tickers:
+
             self.static_tickers.append(t)
+
             self.save_stored_data()
+
             self.refresh_data()
+
+    # =========================================================
 
     def remove_ticker(self, *a):
+
         t = self.input_field.text.strip().upper()
+
         self.input_field.text = ""
+
         if t in self.static_tickers:
+
             self.static_tickers.remove(t)
+
             self.save_stored_data()
+
             self.refresh_data()
 
-    def _fetch(self, *args, **kwargs):
+    # =========================================================
+
+    def refresh_data(self):
+
+        if self.scan_running:
+            return
+
+        self.scan_running = True
+
+        self.scan_btn.disabled = True
+
+        self.content.clear_widgets()
+
+        self.content.add_widget(
+            MDLabel(
+                text="Ładowanie danych...",
+                halign="center"
+            )
+        )
+
+        SCAN_POOL.submit(self._fetch)
+
+    # =========================================================
+
+    def _fetch(self):
+
         cards_data = []
+
         try:
-            gainers_pre = fetch_top_gainers_by_type("pre_market_gainers")[:10]
-            gainers_open = fetch_top_gainers_by_type("day_gainers")[:10]
-            gainers_post = fetch_top_gainers_by_type("after_hours_gainers")[:10]
+
+            gainers_pre = fetch_top_gainers_by_type(
+                "pre_market_gainers"
+            )[:6]
+
+            gainers_open = fetch_top_gainers_by_type(
+                "day_gainers"
+            )[:6]
+
+            gainers_post = fetch_top_gainers_by_type(
+                "after_hours_gainers"
+            )[:6]
+
         except Exception as e:
+
             print(f"Skaner screener error: {e}")
-            gainers_pre, gainers_open, gainers_post = [], [], []
+
+            gainers_pre = []
+            gainers_open = []
+            gainers_post = []
 
         pre_set = set(gainers_pre)
+
         day_set = set(gainers_open)
+
         post_set = set(gainers_post)
 
-        all_tickers = list(dict.fromkeys(self.static_tickers + gainers_pre + gainers_open + gainers_post))
-        bulk_data = fetch_bulk_ticker_data(all_tickers)
+        all_tickers = list(dict.fromkeys(
+            self.static_tickers +
+            gainers_pre +
+            gainers_open +
+            gainers_post
+        ))
+
+        # ===== ANDROID SAFE LIMIT =====
+        all_tickers = all_tickers[:25]
 
         app = MDApp.get_running_app()
-        add_cache_items(app, bulk_data, visible_symbols=all_tickers)
 
-        signature = tuple(sorted([s for s in all_tickers if s in bulk_data]))
+        bulk_data = {}
+
+        # ===== BATCH DOWNLOAD =====
+        for chunk in chunked_list(all_tickers, 5):
+
+            try:
+
+                partial = fetch_bulk_ticker_data(chunk)
+
+                if partial:
+                    bulk_data.update(partial)
+
+            except Exception as e:
+                print(f"bulk chunk error: {e}")
+
+            time.sleep(0.25)
+
+        add_cache_items(
+            app,
+            bulk_data,
+            visible_symbols=all_tickers
+        )
+
+        signature = tuple(sorted([
+            s for s in all_tickers
+            if s in bulk_data
+        ]))
 
         for sym in all_tickers:
-            data = app.shared_cache.get(sym)
-            if not data:
-                continue
 
-            comp_name = normalize_company_name(sym, data.get("name", sym))
-            session_info = get_session_snapshot(data)
-            session = session_info["session"]
-            active_price = session_info["price"]
-            chg_val = session_info["change_amt"]
-            chg_pct = session_info["change_pct"]
-            session_label = session_info["session_label"]
-
-            source_tag = session_source_tag(session, sym, pre_set, day_set, post_set)
-            closes = data.get('closes', [])
-            macd_v, sig_v, _ = calculate_macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
-            hist = calculate_histogram(macd_v, sig_v)
-
-            rsi_val = calculate_rsi(closes, 14) if closes else 50.0
-            rsi_str = (
-                color_wrap(f"{rsi_val:.1f} (Wyprzedanie)", "#00AA00") if rsi_val <= 35 else
-                color_wrap(f"{rsi_val:.1f} (Wykupienie)", "#FF0000") if rsi_val >= 65 else
-                color_wrap(f"{rsi_val:.1f} (Neutralny)", "#777777")
-            )
-
-            macd_v, sig_v, _ = calculate_macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
-            macd_str = color_wrap(f"{macd_v:.2f}", color_for_macd(macd_v, sig_v))
-            hist_str = format_histogram(hist)
-
-            vol_val = data.get('vol', 0)
-            avg_vol_val = data.get('avg_vol', 0)
-            cap_str = format_market_cap(data.get('market_cap', 0))
-            pe_str = str(data.get('pe', 'N/A'))
-
-            trade_score, trade_signal_text, trade_signal_color = calculate_signal_strength(
-                rsi_val, macd_v, sig_v, hist=hist, price=active_price,
-                sma14=calc_sma(closes, 14, active_price), sma30=calc_sma(closes, 30, active_price), sma90=calc_sma(closes, 90, active_price),
-                volume=vol_val, avg_volume=avg_vol_val
-            )
-            trade_signal = color_wrap(f"[b]{trade_signal_text}[/b]", trade_signal_color)
-
-            sma14 = calc_sma(closes, 14, active_price)
-            sma50 = calc_sma(closes, 50, active_price)
-
-            txt = (
-                f"{session_label} {source_tag} [color=#008080][b]{comp_name}[/b][/color]\n"
-                f"Cena ({session_label}): [b]{active_price:.2f} USD[/b] ([color={'#00AA00' if chg_val >= 0 else '#FF0000'}]{chg_val:+.2f} USD | {chg_pct:+.2f}%[/color])\n"
-                f"Wolumen: {vol_val:,} (Śred. 10D: {avg_vol_val:,})\n"
-                f"Kapitalizacja: {cap_str} | P/E: [b]{pe_str}[/b]\n"
-                f"RSI: {rsi_str} | MACD: {macd_str} | Histogram: {hist_str}\n"
-                f"SMA14: {format_price_line(sma14, active_price)} | SMA50: {format_price_line(sma50, active_price)}\n"
-                f"Sygnał: {trade_signal}"
-            )
-            cards_data.append(txt)
-
-        if signature and signature != self._last_scan_signature:
-            self._last_scan_signature = signature
             try:
-                app.send_notification("Skaner", f"Zaktualizowano wyniki dla {len(signature)} spółek.")
+
+                data = app.shared_cache.get(sym)
+
+                if not data:
+                    continue
+
+                comp_name = normalize_company_name(
+                    sym,
+                    data.get("name", sym)
+                )
+
+                session_info = get_session_snapshot(data)
+
+                session = session_info["session"]
+
+                active_price = session_info["price"]
+
+                chg_val = session_info["change_amt"]
+
+                chg_pct = session_info["change_pct"]
+
+                session_label = session_info["session_label"]
+
+                source_tag = session_source_tag(
+                    session,
+                    sym,
+                    pre_set,
+                    day_set,
+                    post_set
+                )
+
+                closes = data.get('closes', [])
+
+                macd_v, sig_v, _ = (
+                    calculate_macd(closes)
+                    if len(closes) > 35
+                    else (0.0, 0.0, 0.0)
+                )
+
+                hist = calculate_histogram(
+                    macd_v,
+                    sig_v
+                )
+
+                rsi_val = (
+                    calculate_rsi(closes, 14)
+                    if closes else 50.0
+                )
+
+                rsi_str = (
+                    color_wrap(
+                        f"{rsi_val:.1f} (Wyprzedanie)",
+                        "#00AA00"
+                    ) if rsi_val <= 35 else
+                    color_wrap(
+                        f"{rsi_val:.1f} (Wykupienie)",
+                        "#FF0000"
+                    ) if rsi_val >= 65 else
+                    color_wrap(
+                        f"{rsi_val:.1f} (Neutralny)",
+                        "#777777"
+                    )
+                )
+
+                macd_str = color_wrap(
+                    f"{macd_v:.2f}",
+                    color_for_macd(macd_v, sig_v)
+                )
+
+                hist_str = format_histogram(hist)
+
+                vol_val = data.get('vol', 0)
+
+                avg_vol_val = data.get('avg_vol', 0)
+
+                cap_str = format_market_cap(
+                    data.get('market_cap', 0)
+                )
+
+                pe_str = str(
+                    data.get('pe', 'N/A')
+                )
+
+                trade_score, trade_signal_text, trade_signal_color = calculate_signal_strength(
+                    rsi_val,
+                    macd_v,
+                    sig_v,
+                    hist=hist,
+                    price=active_price,
+                    sma14=calc_sma(closes, 14, active_price),
+                    sma30=calc_sma(closes, 30, active_price),
+                    sma90=calc_sma(closes, 90, active_price),
+                    volume=vol_val,
+                    avg_volume=avg_vol_val
+                )
+
+                trade_signal = color_wrap(
+                    f"[b]{trade_signal_text}[/b]",
+                    trade_signal_color
+                )
+
+                sma14 = calc_sma(
+                    closes,
+                    14,
+                    active_price
+                )
+
+                sma50 = calc_sma(
+                    closes,
+                    50,
+                    active_price
+                )
+
+                txt = (
+                    f"{session_label} "
+                    f"{source_tag} "
+                    f"[color=#008080][b]{comp_name}[/b][/color]\n"
+
+                    f"Cena: [b]{active_price:.2f} USD[/b] "
+                    f"([color={'#00AA00' if chg_val >= 0 else '#FF0000'}]"
+                    f"{chg_val:+.2f} USD | {chg_pct:+.2f}%[/color])\n"
+
+                    f"Wolumen: {vol_val:,}\n"
+
+                    f"Kapitalizacja: {cap_str} | "
+                    f"P/E: [b]{pe_str}[/b]\n"
+
+                    f"RSI: {rsi_str}\n"
+
+                    f"MACD: {macd_str}\n"
+
+                    f"Histogram: {hist_str}\n"
+
+                    f"SMA14: {format_price_line(sma14, active_price)}\n"
+
+                    f"SMA50: {format_price_line(sma50, active_price)}\n"
+
+                    f"Sygnał: {trade_signal}"
+                )
+
+                cards_data.append(txt)
+
             except Exception as e:
-                print(f"Skaner notification error: {e}")
+
+                print(f"Skaner card error {sym}: {e}")
 
         self.last_update_text = timestamp_text()
-        Clock.schedule_once(lambda dt: self._render(cards_data))
+
+        Clock.schedule_once(
+            lambda dt: self._render(cards_data)
+        )
+
+    # =========================================================
 
     def _render(self, cards):
+
         self.content.clear_widgets()
-        self.content.add_widget(MDLabel(text=color_wrap(f"Ostatnia aktualizacja: {getattr(self, 'last_update_text', timestamp_text())}", "#888888"), markup=True, size_hint_y=None, height=dp(24), halign="left"))
-        for c in cards:
-            self.content.add_widget(DataCard(text=c))
+
+        self.content.add_widget(
+            MDLabel(
+                text=color_wrap(
+                    f"Ostatnia aktualizacja: "
+                    f"{getattr(self, 'last_update_text', timestamp_text())}",
+                    "#888888"
+                ),
+                markup=True,
+                size_hint_y=None,
+                height=dp(24),
+                halign="left"
+            )
+        )
+
+        # ===== ANDROID SAFE RENDER =====
+        for card in cards[:25]:
+
+            try:
+                self.content.add_widget(
+                    DataCard(text=card)
+                )
+            except Exception as e:
+                print(f"render card error: {e}")
+
+        self.scan_running = False
+
+        self.scan_btn.disabled = False
 
 
 class TickerTab(ScrollableTab):
@@ -1632,7 +2075,7 @@ class TickerTab(ScrollableTab):
     def refresh_data(self, sym=None, *args, **kwargs):
         if not sym: return
         self._msg("Pobieranie danych API... Proszę czekać.", is_card=False)
-        threading.Thread(target=self._safe_fetch, args=(sym,), daemon=True).start()
+        SCAN_POOL.submit(target=self._safe_fetch, args=(sym,), daemon=True).start()
 
     def _fetch(self, ticker, *args, **kwargs):
         data = fetch_finnhub_ticker_data(ticker)
@@ -2176,6 +2619,7 @@ class NewsTab(ScrollableTab):
                 display = f"{ticker} ({comp_name})" if ticker != "RYNEK" and comp_name and comp_name.upper() != ticker.upper() else ticker
                 txt = f"[color=#FF9900][b]{display}[/b][/color]\nKapitalizacja: [b]{cap_str}[/b]\n[ref={link}]{title}[/ref]"
                 self.content.add_widget(DataCard(text=txt))
+                
 class CfdShortTab(ScrollableTab):
     def __init__(self, **kw):
         kw['title'] = "CFD/Własne"
@@ -2210,191 +2654,368 @@ class CfdShortTab(ScrollableTab):
             "KC=F", "ZW=F", "ZR=F", "BRN=F", "RB=F", "HO=F", "ZS=F", "LE=F"
         ][:24]
 
-    def _fetch(self, *args, **kwargs):
-        force = kwargs.get('force', False)
-        app = MDApp.get_running_app()
+def _fetch(self, *args, **kwargs):
 
-        universe = self._get_universe(force=force)[:110]
-        cfd_universe = self._cfd_universe()[:24]
-        required = list(dict.fromkeys(universe + cfd_universe))
-        is_cache_fresh = app.cache_time and (datetime.now() - app.cache_time).total_seconds() < 240 and not force
+    force = kwargs.get('force', False)
 
-        if is_cache_fresh and all(sym in app.shared_cache for sym in required):
-            bulk_data = {k: app.shared_cache[k] for k in required if k in app.shared_cache}
-        else:
-            bulk_data = fetch_bulk_ticker_data_serial(required, chunk_size=6)
-            add_cache_items(app, bulk_data, visible_symbols=required)
+    app = MDApp.get_running_app()
 
-        a_candidates = []
-        b_candidates = []
-        c_candidates = []
-        d_list = []
+    universe = self._get_universe(force=force)[:60]
 
-        for sym in required:
+    cfd_universe = self._cfd_universe()[:18]
+
+    required = list(dict.fromkeys(
+        universe + cfd_universe
+    ))
+
+    is_cache_fresh = (
+        app.cache_time and
+        (datetime.now() - app.cache_time).total_seconds() < 240 and
+        not force
+    )
+
+    # =====================================================
+    # SAFE BULK DOWNLOAD
+    # =====================================================
+
+    if is_cache_fresh and all(
+        sym in app.shared_cache
+        for sym in required
+    ):
+
+        bulk_data = {
+            k: app.shared_cache[k]
+            for k in required
+            if k in app.shared_cache
+        }
+
+    else:
+
+        bulk_data = {}
+
+        for chunk in chunked_list(required, 5):
+
+            try:
+
+                partial = fetch_bulk_ticker_data_serial(
+                    chunk,
+                    chunk_size=5
+                )
+
+                if partial:
+                    bulk_data.update(partial)
+
+            except Exception as e:
+
+                print(f"CFD chunk error: {e}")
+
+            time.sleep(0.2)
+
+        add_cache_items(
+            app,
+            bulk_data,
+            visible_symbols=required
+        )
+
+    # =====================================================
+    # RESULTS
+    # =====================================================
+
+    a_candidates = []
+
+    b_candidates = []
+
+    c_candidates = []
+
+    d_list = []
+
+    # =====================================================
+    # SAFE ANALYSIS LOOP
+    # =====================================================
+
+    for idx, sym in enumerate(required):
+
+        try:
+
             data = app.shared_cache.get(sym)
-            if not data or safe_number(data.get("price", 0.0), 0.0) <= 0:
+
+            if not data:
                 continue
 
-            p = safe_number(data.get("price", 0.0), 0.0)
+            p = safe_number(
+                data.get("price", 0.0),
+                0.0
+            )
+
+            if p <= 0:
+                continue
+
             closes = data.get("closes", [])
-            if len(closes) < 10:
+
+            if len(closes) < 20:
                 continue
 
-            comp_name = normalize_company_name(sym, data.get("name", sym))
-            vol = int(data.get("vol", 0) or 0)
-            sma14 = calc_sma(closes, 14, p)
-            sma30 = calc_sma(closes, 30, p)
-            sma50 = calc_sma(closes, 50, p)
-            sma90 = calc_sma(closes, 90, p)
-            rsi = calculate_rsi(closes, 14)
-            macd, sig, _ = calculate_macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
-            hist = calculate_histogram(macd, sig)
-            score, signal_text, signal_color = calculate_signal_strength(rsi, macd, sig, hist=hist, price=p, sma14=sma14, sma30=sma30, sma90=sma90, volume=data.get('vol',0), avg_volume=data.get('avg_vol',0))
-            signal = color_wrap(f"[b]{signal_text}[/b]", signal_color)
-            cap = safe_number(data.get("market_cap", 0), 0.0)
+            comp_name = normalize_company_name(
+                sym,
+                data.get("name", sym)
+            )
 
-            if cap >= 50_000_000 and p >= 30 and rsi < 40 and macd > sig and hist > 0:
-                a_score = (40 - rsi) + max(hist, 0) * 10 + (macd - sig) * 5 + (p / max(sma30, 1)) * 0.1
+            vol = int(
+                data.get("vol", 0) or 0
+            )
+
+            sma14 = calc_sma(closes, 14, p)
+
+            sma30 = calc_sma(closes, 30, p)
+
+            sma50 = calc_sma(closes, 50, p)
+
+            sma90 = calc_sma(closes, 90, p)
+
+            rsi = calculate_rsi(closes, 14)
+
+            macd, sig, _ = (
+                calculate_macd(closes)
+                if len(closes) > 35
+                else (0.0, 0.0, 0.0)
+            )
+
+            hist = calculate_histogram(
+                macd,
+                sig
+            )
+
+            score, signal_text, signal_color = calculate_signal_strength(
+                rsi,
+                macd,
+                sig,
+                hist=hist,
+                price=p,
+                sma14=sma14,
+                sma30=sma30,
+                sma90=sma90,
+                volume=data.get('vol', 0),
+                avg_volume=data.get('avg_vol', 0)
+            )
+
+            signal = color_wrap(
+                f"[b]{signal_text}[/b]",
+                signal_color
+            )
+
+            cap = safe_number(
+                data.get("market_cap", 0),
+                0.0
+            )
+
+            # =================================================
+            # A
+            # =================================================
+
+            if (
+                cap >= 50_000_000 and
+                p >= 30 and
+                rsi < 40 and
+                macd > sig and
+                hist > 0
+            ):
+
+                a_score = (
+                    (40 - rsi) +
+                    max(hist, 0) * 10 +
+                    (macd - sig) * 5 +
+                    (p / max(sma30, 1)) * 0.1
+                )
+
                 a_candidates.append({
-                    "sym": sym, "name": comp_name, "vol": vol, "p": p, "sma14": sma14, "sma30": sma30,
-                    "rsi": rsi, "macd": macd, "sig": sig, "hist": hist, "signal": signal, "score": a_score
+                    "sym": sym,
+                    "name": comp_name,
+                    "vol": vol,
+                    "p": p,
+                    "sma14": sma14,
+                    "sma30": sma30,
+                    "rsi": rsi,
+                    "macd": macd,
+                    "sig": sig,
+                    "hist": hist,
+                    "signal": signal,
+                    "score": a_score
                 })
+
+            # =================================================
+            # B
+            # =================================================
 
             dist14 = sma14 - p
+
             if p < sma14 and dist14 > 1:
-                b_score = dist14 + max(hist, 0) * 5 + max(0, 40 - rsi) * 0.2
-                tp, sl = make_tp_sl(p, 0.03, 0.02)
+
+                b_score = (
+                    dist14 +
+                    max(hist, 0) * 5 +
+                    max(0, 40 - rsi) * 0.2
+                )
+
+                tp, sl = make_tp_sl(
+                    p,
+                    0.03,
+                    0.02
+                )
+
                 b_candidates.append({
-                    "sym": sym, "name": comp_name, "vol": vol, "p": p, "sma14": sma14, "sma30": sma30,
-                    "rsi": rsi, "macd": macd, "sig": sig, "hist": hist, "signal": signal, "score": b_score,
-                    "tp": tp, "sl": sl
+                    "sym": sym,
+                    "name": comp_name,
+                    "vol": vol,
+                    "p": p,
+                    "sma14": sma14,
+                    "sma30": sma30,
+                    "rsi": rsi,
+                    "macd": macd,
+                    "sig": sig,
+                    "hist": hist,
+                    "signal": signal,
+                    "score": b_score,
+                    "tp": tp,
+                    "sl": sl
                 })
+
+            # =================================================
+            # C
+            # =================================================
 
             dist90 = sma90 - p
+
             if p < sma90 and dist90 > 1:
-                c_score = dist90 + max(hist, 0) * 3 + max(0, 45 - rsi) * 0.1
+
+                c_score = (
+                    dist90 +
+                    max(hist, 0) * 3 +
+                    max(0, 45 - rsi) * 0.1
+                )
+
                 c_candidates.append({
-                    "sym": sym, "name": comp_name, "vol": vol, "p": p, "sma14": sma14, "sma30": sma30,
-                    "rsi": rsi, "macd": macd, "sig": sig, "hist": hist, "signal": signal, "score": c_score,
-                    "dist": dist90, "diff": dist90
+                    "sym": sym,
+                    "name": comp_name,
+                    "vol": vol,
+                    "p": p,
+                    "sma14": sma14,
+                    "sma30": sma30,
+                    "rsi": rsi,
+                    "macd": macd,
+                    "sig": sig,
+                    "hist": hist,
+                    "signal": signal,
+                    "score": c_score,
+                    "dist": dist90,
+                    "diff": dist90
                 })
 
-        for sym in cfd_universe:
-            data = app.shared_cache.get(sym)
-            if not data or safe_number(data.get("price", 0.0), 0.0) <= 0:
-                continue
-            p = safe_number(data.get("price", 0.0), 0.0)
-            closes = data.get("closes", [])
-            if len(closes) < 10:
-                continue
-            comp_name = normalize_company_name(sym, data.get("name", sym))
-            vol = int(data.get("vol", 0) or 0)
-            sma14 = calc_sma(closes, 14, p)
-            sma30 = calc_sma(closes, 30, p)
-            sma90 = calc_sma(closes, 90, p)
-            rsi = calculate_rsi(closes, 14)
-            macd, sig, _ = calculate_macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
-            hist = calculate_histogram(macd, sig)
-            diff = abs(p - sma90)
-            if diff <= 1:
-                continue
-            score, signal_text, signal_color = calculate_signal_strength(rsi, macd, sig, hist=hist, price=p, sma14=sma14, sma30=sma30, sma90=sma90, volume=data.get('vol',0), avg_volume=data.get('avg_vol',0))
-            tp, sl = make_tp_sl(p, 0.03, 0.02)
-            d_list.append({
-                "sym": sym, "name": comp_name, "vol": vol, "p": p, "sma14": sma14, "sma30": sma30, "sma90": sma90,
-                "rsi": rsi, "macd": macd, "sig": sig, "hist": hist, "signal": color_wrap(f"[b]{signal_text}[/b]", signal_color),
-                "score": score, "tp": tp, "sl": sl, "diff": diff
-            })
+            # =================================================
+            # D CFD
+            # =================================================
 
-        a_candidates.sort(key=lambda x: x["score"], reverse=True)
-        b_candidates.sort(key=lambda x: x["score"], reverse=True)
-        c_candidates.sort(key=lambda x: x["dist"], reverse=True)
-        d_list.sort(key=lambda x: x["score"], reverse=True)
+            if sym in cfd_universe:
 
-        signature = tuple(x["sym"] for x in a_candidates[:10])
-        if signature and signature != self._last_section_a_signature:
-            self._last_section_a_signature = signature
-            try:
-                title = "CFD/Własne - Sekcja A"
-                message = f"Znaleziono {len(signature)} spółek spełniających warunki."
-                queue_service_event(
-                    "cfd_alarm",
-                    title,
-                    message,
-                    f"{title}|{len(signature)}|{'|'.join(signature[:5])}",
-                    {"symbols": list(signature), "count": len(signature)},
-                )
-                MDApp.get_running_app().send_notification(title, message)
-            except Exception as e:
-                print(f"Notification error: {e}")
+                diff = abs(p - sma90)
 
-        def suggestion_from_group(rows):
-            if not rows:
-                return "Brak danych"
-            avg = sum(r["score"] for r in rows) / len(rows)
-            if avg >= 4.5:
-                return "MOCNE KUP"
-            if avg >= 2.0:
-                return "KUP"
-            if avg >= 0.0:
-                return "TRZYMAJ"
-            if avg >= -2.0:
-                return "SPRZEDAJ"
-            return "MOCNE SPRZEDAJ"
+                if diff > 1:
 
-        def format_row(row, show_tp_sl=False, show_diff=False):
-            p = row["p"]
-            vol = row["vol"]
-            name = row["name"]
-            sma14 = row.get("sma14", p)
-            sma30 = row.get("sma30", p)
-            sma90 = row.get("sma90", p)
-            rsi = row["rsi"]
-            macd = row["macd"]
-            sig = row["sig"]
-            hist = row["hist"]
+                    tp, sl = make_tp_sl(
+                        p,
+                        0.03,
+                        0.02
+                    )
 
-            lines = [
-                f"[b]{name}[/b]",
-                f"Ticker: [b]{row['sym']}[/b] | Wolumen: {vol:,} | Cena: [b]{p:.2f}[/b]",
-                f"SMA14: {format_price_line(sma14, p)} | SMA30: {format_price_line(sma30, p)}",
-                f"RSI: [color={color_for_rsi(rsi)}]{rsi:.1f}[/color] | MACD: [color={color_for_macd(macd, sig)}]{macd:.3f}[/color] | Histogram: {format_histogram(hist)}",
-                f"Sygnał: {row['signal']}",
-            ]
-            if show_diff:
-                diff_val = safe_number(row.get('diff', row.get('dist', 0.0)), 0.0)
-                lines.append(f"SMA90: {format_price_line(sma90, p)} | Różnica: [b]{diff_val:.2f}[/b]")
-            if show_tp_sl:
-                lines.append(f"TP: [color=#00AA00]{row['tp']:.2f}[/color] | SL: [color=#FF3333]{row['sl']:.2f}[/color]")
-            return "\n".join(lines)
+                    d_list.append({
+                        "sym": sym,
+                        "name": comp_name,
+                        "vol": vol,
+                        "p": p,
+                        "sma14": sma14,
+                        "sma30": sma30,
+                        "sma90": sma90,
+                        "rsi": rsi,
+                        "macd": macd,
+                        "sig": sig,
+                        "hist": hist,
+                        "signal": signal,
+                        "score": score,
+                        "tp": tp,
+                        "sl": sl,
+                        "diff": diff
+                    })
 
-        sec_a = [f"{format_row(r)}" for r in a_candidates[:10]]
-        sec_b = [f"{format_row(r, show_tp_sl=True)}" for r in b_candidates[:10]]
-        sec_c = [f"{format_row(r, show_diff=True)}" for r in c_candidates[:10]]
-        sec_d = [f"{format_row(r, show_tp_sl=True)}" for r in d_list[:12]]
+            # ===== ANDROID CPU COOL DOWN =====
 
-        if not sec_a:
-            sec_a = ["Brak spółek spełniających warunki."]
-        if not sec_b:
-            sec_b = ["Brak spółek poniżej SMA14."]
-        if not sec_c:
-            sec_c = ["Brak spółek poniżej SMA90."]
-        if not sec_d:
-            sec_d = ["Brak danych CFD."]
+            if idx % 8 == 0:
+                time.sleep(0.03)
 
-        summary_a = suggestion_from_group(a_candidates[:10])
-        summary_b = suggestion_from_group(b_candidates[:10])
-        summary_c = suggestion_from_group(c_candidates[:10])
-        summary_d = suggestion_from_group(d_list[:10])
+        except Exception as e:
 
-        payload = {
-            f"A: DYNAMICZNE BREAKOUTY | OSTATECZNA SUGESTIA: {summary_a}": sec_a,
-            f"B: WYBICIE PONIŻEJ SMA14 | OSTATECZNA SUGESTIA: {summary_b}": sec_b,
-            f"C: PONIŻEJ SMA90 | OSTATECZNA SUGESTIA: {summary_c}": sec_c,
-            f"D: CFD | OSTATECZNA SUGESTIA: {summary_d}": sec_d,
-        }
-        self.last_update_text = timestamp_text()
-        Clock.schedule_once(lambda dt: self._render(payload))
+            print(f"CFD analyze error {sym}: {e}")
+
+    # =====================================================
+    # SORT
+    # =====================================================
+
+    a_candidates.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    b_candidates.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    c_candidates.sort(
+        key=lambda x: x["dist"],
+        reverse=True
+    )
+
+    d_list.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    # =====================================================
+    # LIMIT RESULTS
+    # =====================================================
+
+    a_candidates = a_candidates[:8]
+
+    b_candidates = b_candidates[:8]
+
+    c_candidates = c_candidates[:8]
+
+    d_list = d_list[:8]
+
+    # =====================================================
+    # FORMAT
+    # =====================================================
+
+    def simple_row(row):
+
+        return (
+            f"[b]{row['name']}[/b]\n"
+            f"Ticker: [b]{row['sym']}[/b]\n"
+            f"Cena: [b]{row['p']:.2f}[/b]\n"
+            f"RSI: {row['rsi']:.1f}\n"
+            f"Sygnał: {row['signal']}"
+        )
+
+    payload = {
+        "A": [simple_row(x) for x in a_candidates] or ["Brak danych"],
+        "B": [simple_row(x) for x in b_candidates] or ["Brak danych"],
+        "C": [simple_row(x) for x in c_candidates] or ["Brak danych"],
+        "D": [simple_row(x) for x in d_list] or ["Brak danych"],
+    }
+
+    self.last_update_text = timestamp_text()
+
+    Clock.schedule_once(
+        lambda dt: self._render(payload)
+    )
 
     def _render(self, payload):
         self.content.clear_widgets()
@@ -2466,7 +3087,7 @@ class StockScannerPro(MDApp):
             return
         self._scheduler_started = True
         self._scheduler_running = True
-        threading.Thread(target=self._scheduler_loop, daemon=True).start()
+        SCAN_POOL.submit(target=self._scheduler_loop, daemon=True).start()
         if not IS_GITHUB:
             Clock.schedule_interval(self.cron_time_checker, 30)
 
