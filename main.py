@@ -845,8 +845,6 @@ SERVICE_ACK_FILENAME = "ack.json"
 
 def _service_paths():
     app = MDApp.get_running_app()
-        if not app:
-        return
     base_dir = os.path.join(app.user_data_dir, SERVICE_BRIDGE_SUBDIR) if app else os.path.join(os.path.expanduser("~"), SERVICE_BRIDGE_SUBDIR)
     os.makedirs(base_dir, exist_ok=True)
     return {
@@ -1571,13 +1569,13 @@ class ScrollableTab(MDBoxLayout, MDTabsBase):
         self._loading = True
         self.content.clear_widgets()
         self.content.add_widget(MDLabel(text="Pobieranie danych...", halign="center"))
-        SCAN_POOL.submit(target=self._safe_fetch, args=args, kwargs=kwargs, daemon=True).start()
+        SCAN_POOL.submit(self._safe_fetch, *args, **kwargs)
 
     def refresh_data(self, *args, **kwargs):
         app = MDApp.get_running_app()
         if not app:
-        return
-        if app and hasattr(app, 'schedule_tab_refresh'):
+            return
+        if hasattr(app, 'schedule_tab_refresh'):
             app.schedule_tab_refresh(self, args=args, kwargs=kwargs)
             return
         self._begin_refresh(*args, **kwargs)
@@ -1698,7 +1696,8 @@ class InfoTab(ScrollableTab):
     def run_notification_test(self):
         app = MDApp.get_running_app()
         if app:
-            app.send_notification(title="Test Powiadomienia", message="Test udany!")
+            try:
+                app.send_notification(title="Test Powiadomień", message="Test udany!")
             except Exception:
                 pass
 
@@ -1712,7 +1711,7 @@ class InfoTab(ScrollableTab):
             return
         self.status_container.clear_widgets()
         self.status_container.add_widget(MDLabel(text="Pobieranie statusu rynku...", halign="center"))
-        SCAN_POOL.submit(target=self._safe_fetch, kwargs={"force": force}, daemon=True).start()
+        SCAN_POOL.submit(self._safe_fetch, force=force)
 
     def _fetch(self, *args, **kwargs):
         try:
@@ -2070,7 +2069,7 @@ class TickerTab(ScrollableTab):
     def refresh_data(self, sym=None, *args, **kwargs):
         if not sym: return
         self._msg("Pobieranie danych API... Proszę czekać.", is_card=False)
-        SCAN_POOL.submit(target=self._safe_fetch, args=(sym,), daemon=True).start()
+        SCAN_POOL.submit(self._safe_fetch, sym)
 
     def _fetch(self, ticker, *args, **kwargs):
         data = fetch_finnhub_ticker_data(ticker)
@@ -2236,7 +2235,7 @@ class KatalizatoryTab(ScrollableTab):
 
         try:
             app = MDApp.get_running_app()
-                if not app:
+            if not app:
                 return
             watch_list = []
             if hasattr(app, 'tabs_instances'):
@@ -2423,7 +2422,8 @@ class NewsTab(ScrollableTab):
     def _store_path(self):
         app = MDApp.get_running_app()
         if not app:
-        return os.path.join(app.user_data_dir, "pr_news_store.json") if app else None
+            return None
+        return os.path.join(app.user_data_dir, "pr_news_store.json")
 
     def _load_daily_items(self):
         path = self._store_path()
@@ -2469,7 +2469,7 @@ class NewsTab(ScrollableTab):
     def _fetch(self, *args):
         app = MDApp.get_running_app()
         if not app:
-        return
+            return
         watch_list = []
         if hasattr(app, 'tabs_instances'):
             skaner = next((t for t in app.tabs_instances if isinstance(t, SkanerTab)), None)
@@ -2514,10 +2514,9 @@ class NewsTab(ScrollableTab):
                     if not queued:
                         try:
                             if app:
-                            app.send_notification(f"PR / Catalyst: {ticker}", title)
+                                app.send_notification(f"PR / Catalyst: {ticker}", title)
                         except Exception as e:
                             print(f"PR notification error: {e}")
-                            pass
 
         # PR / watchlist news
         if watch_list:
@@ -2572,7 +2571,7 @@ class NewsTab(ScrollableTab):
     def _render_news(self):
         app = MDApp.get_running_app()
         if not app:
-        return
+            return
         self.content.clear_widgets()
         self.content.add_widget(MDLabel(text=color_wrap(f"Ostatnia aktualizacja: {getattr(self, 'last_update_text', timestamp_text())}", "#888888"), markup=True, size_hint_y=None, height=dp(24), halign="left"))
         self.content.add_widget(MDLabel(text="[b][color=#00FFFF]📰 AKTUALNOŚCI I NOWOŚCI RYNKOWE[/color][/b]", markup=True, size_hint_y=None, height=dp(40)))
@@ -3025,7 +3024,7 @@ class StockScannerPro(MDApp):
             return
         self._scheduler_started = True
         self._scheduler_running = True
-        SCAN_POOL.submit(target=self._scheduler_loop, daemon=True).start()
+        SCAN_POOL.submit(self._scheduler_loop)
         if not IS_GITHUB:
             Clock.schedule_interval(self.cron_time_checker, 30)
 
