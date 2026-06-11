@@ -40,7 +40,3 @@ android.services = ScanerService:service.py
 
 warn_on_root = 0
 log_level = 2
-
-[buildozer]
-warn_on_root = 0
-log_level = 2
