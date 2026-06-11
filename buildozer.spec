@@ -25,7 +25,7 @@ android.ndk = 23b
 android.sdk = 33
 android.build_tools_version = 33.0.2
 android.release_artifact = apk
-
+android.enable_aab = False
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,POST_NOTIFICATIONS,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,RECEIVE_BOOT_COMPLETED
 
 android.accept_sdk_license = True
