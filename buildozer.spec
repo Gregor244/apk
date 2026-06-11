@@ -46,6 +46,8 @@ android.services = stockscanner:service.py
 
 android.build_tools = 34.0.0
 
+android.release_artifact = apk
+
 android.gradle_dependencies =
 
 android.add_packaging_options =
