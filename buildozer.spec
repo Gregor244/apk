@@ -1,53 +1,65 @@
 [app]
-title = Skanergieldypro
-package.name = skanergieldypro
-package.domain = org.test
+# (str) Title of your application
+title = StockScannerPro
 
+# (str) Package name
+package.name = stockscannerpro
+
+# (str) Package domain
+package.domain = org.gregor244
+
+# (str) Source code where the main.py lives
 source.dir = .
+
+# (str) Source files to include
 source.include_exts = py,png,jpg,jpeg,kv,atlas,json
 
-version = 1.2
+# (list) Application requirements
+requirements = python3,kivy,kivymd,requests,certifi,plyer
 
-requirements = hostpython3==3.11.8,python3==3.11.8,kivy==2.3.0,kivymd==1.2.0,pillow,requests,plyer,certifi,urllib3,chardet,idna,
-
+# (str) Supported orientation
 orientation = portrait
-fullscreen = 0
 
-icon.filename = %(source.dir)s/icon.png
-
-# ANDROID
-android.api = 34
-android.minapi = 24
-android.ndk_api = 24
-android.ndk = 25b
-
-# UPRAWNIENIA
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,POST_NOTIFICATIONS,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,RECEIVE_BOOT_COMPLETED
-
-# FOREGROUND SERVICE
-services = ScanerService:service.py
-
-# STABILNOŚĆ
-android.accept_sdk_license = True
-android.enable_androidx = True
-android.allow_backup = False
-
-# P4A
-p4a.bootstrap = sdl2
-
-# LOGI
+# (bool) Preserve logcat output
 log_level = 2
 
-# OPTYMALIZACJA
-warn_on_root = 0
+# (str) Android entry point
+android.entrypoint = org.kivy.android.PythonActivity
 
-# SPLASH
-presplash.color = #101010
-android.presplash_color = #101010
+# (list) Permissions
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,POST_NOTIFICATIONS,FOREGROUND_SERVICE,WAKE_LOCK
 
-# WAŻNE DLA STABILNOŚCI
-android.release_artifact = apk
-environment = LANG=en_US.UTF-8
+# (list) Android architectures
+android.archs = arm64-v8a,armeabi-v7a
+
+# (str) Android API
+android.api = 34
+
+# (str) Android minimum API
+android.minapi = 24
+
+# (str) Android SDK version
+android.sdk = 24
+
+# (str) Android NDK version
+android.ndk = 25b
+
+# (str) Services
+android.services = stockscanner:service.py
+
+# (bool) Fullscreen
+fullscreen = 0
+
+# (bool) Allow rotation
+allow_rotation = 0
 
 [buildozer]
-warn_on_root = 0
+# (int) Log level
+log_level = 2
+
+# (str) Warn on root usage
+warn_on_root = 1
+
+[app:android]
+# (str) Preset name for Android packaging
+android.p4a_dir = 
