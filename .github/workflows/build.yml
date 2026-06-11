@@ -3,7 +3,7 @@ name: Build StockScannerPro APK
 env:
   BUILDOZER_WARN_ON_ROOT: 0
   P4A_RELEASE_KEYSTORE: ""
-  RELEASE_ARTIFACT: apk
+  BUILDOZER_ALLOW_AAB: 0
 
 on:
   workflow_dispatch:
@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -31,42 +30,29 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt update
-
           sudo apt install -y \
-            zip \
-            unzip \
-            tar \
-            wget \
-            curl \
-            git \
-            build-essential \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libffi-dev \
-            libssl-dev \
-            cmake \
+            zip unzip tar wget curl git \
+            build-essential autoconf automake libtool pkg-config \
+            zlib1g-dev libncurses5-dev libffi-dev libssl-dev cmake \
             openjdk-17-jdk
 
       - name: Clean caches
         run: |
-          rm -rf .buildozer
-          rm -rf ~/.buildozer
-          rm -rf ~/.gradle/caches
+          rm -rf .buildozer ~/.buildozer ~/.gradle/caches
 
       - name: Upgrade pip
         run: |
           python -m pip install --upgrade pip setuptools wheel
 
-      - name: Install Buildozer
+      - name: Install Buildozer (FORCE STABLE)
         run: |
-          pip install \
-            cython==0.29.33 \
-            buildozer==1.5.0 \
-            virtualenv
+          pip install cython==0.29.33
+          pip install "buildozer==1.5.0"
+          pip install virtualenv
+
+      - name: Force clean p4a cache
+        run: |
+          rm -rf ~/.local/share/python-for-android
 
       - name: Build APK
         run: |
