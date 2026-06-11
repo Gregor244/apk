@@ -91,7 +91,7 @@ SCAN_POOL = ThreadPoolExecutor(
 
 SCAN_LOCK = threading.Lock()
 
-ACTIVE_SCAN = False
+ACTIVE_SCAN = threading.Event()
 
 REQUEST_DELAY = 0.12
 
@@ -159,8 +159,6 @@ def get_cached_analysis_for_tab(tab, sym, closes, price, vol, avg_vol):
 
     tab._indicator_cache[key] = result
     return result
-def safe_ui(callback, *args, **kwargs):
-    Clock.schedule_once(lambda dt: callback(*args, **kwargs))
 
 def format_market_cap(val):
     try:
@@ -274,12 +272,60 @@ def extract_intraday_session_price(chart_result, session_state):
     except Exception:
         pass
     return 0.0
+def resolve_active_price(data):
+    """
+    Jeden centralny standard ceny aktywnej.
+    """
+
+    session = str(
+        data.get("session_state") or get_pl_session_hint()
+    ).upper().strip()
+
+    prev_close = safe_number(data.get("prev_close"), 0.0)
+
+    regular = safe_number(data.get("price"), 0.0)
+    pre = safe_number(data.get("pre_price"), 0.0)
+    post = safe_number(data.get("post_price"), 0.0)
+    session_price = safe_number(data.get("session_price"), 0.0)
+
+    if session == "PRE":
+        active = pre or session_price or regular
+
+    elif session == "POST":
+        active = post or session_price or regular
+
+    elif session == "REGULAR":
+        active = regular or session_price
+
+    else:
+        active = regular or prev_close
+
+    if active <= 0:
+        active = prev_close
+
+    return {
+        "session": session,
+        "active_price": active,
+        "prev_close": prev_close,
+        "change_amt": active - prev_close if prev_close else 0.0,
+        "change_pct": (
+            ((active - prev_close) / prev_close) * 100
+            if prev_close > 0 else 0.0
+        )
+    }
 
 def get_cached_analysis(sym, closes, price, vol, avg_vol):
     now = time.time()
-    key = sym
+    key = (
+    sym,
+    len(closes),
+    round(price, 2),
+    round(vol, 0)
+)
 
+    with CACHE_LOCK:
     cached = ANALYSIS_CACHE.get(key)
+    
     if cached and now - cached["ts"] < ANALYSIS_CACHE_TTL:
         return cached["data"]
 
@@ -389,7 +435,22 @@ def calculate_histogram(macd, signal_line):
     except Exception:
         return 0.0
 
+def run_scan_task(fn, *args, callback=None, **kwargs):
 
+    future = SCAN_POOL.submit(fn, *args, **kwargs)
+
+    if callback:
+        def _done(f):
+            try:
+                result = f.result()
+                safe_ui(callback, result)
+            except Exception as e:
+                print(f"[SCAN TASK ERROR] {e}")
+
+        future.add_done_callback(_done)
+
+    return future
+    
 def format_histogram(hist):
     hist = safe_number(hist, 0.0)
     return color_wrap(fmt_num(hist, 3, signed=True), color_for_hist(hist))
@@ -499,110 +560,25 @@ def calculate_signal_strength(rsi, macd, signal_line, hist=None, price=None, sma
 
 def get_session_snapshot(data):
 
-    regular_price = safe_number(data.get("price", 0.0), 0.0)
+    resolved = resolve_active_price(data)
 
-    prev_close = safe_number(data.get("prev_close", 0.0), 0.0)
+    session = resolved["session"]
 
-    pre_price = safe_number(data.get("pre_price", 0.0), 0.0)
-
-    post_price = safe_number(data.get("post_price", 0.0), 0.0)
-
-    session_price = safe_number(data.get("session_price", 0.0), 0.0)
-
-    hint = str(
-        data.get("session_state", "") or get_pl_session_hint()
-    ).upper().strip()
-
-    session = "CLOSED"
-
-    session_label = "[color=#FF9900][b][ZAMKNIĘTY][/b][/color]"
-
-    # ===== PRE =====
-    if hint == "PRE":
-
-        session = "PRE"
-
-        session_label = "[color=#0000FF][b][PRE-MARKET][/b][/color]"
-
-        if pre_price > 0:
-            price = pre_price
-        elif session_price > 0:
-            price = session_price
-        elif regular_price > 0:
-            price = regular_price
-        else:
-            price = prev_close
-
-    # ===== REGULAR =====
-    elif hint == "REGULAR":
-
-        session = "REGULAR"
-
-        session_label = "[color=#00AA00][b][MARKET OPEN][/b][/color]"
-
-        if regular_price > 0:
-            price = regular_price
-        elif session_price > 0:
-            price = session_price
-        else:
-            price = prev_close
-
-    # ===== POST =====
-    elif hint == "POST":
-
-        session = "POST"
-
-        session_label = "[color=#800080][b][POST-MARKET][/b][/color]"
-
-        if post_price > 0:
-            price = post_price
-        elif regular_price > 0:
-            price = regular_price
-        elif session_price > 0:
-            price = session_price
-        else:
-            price = prev_close
-
-    # ===== CLOSED =====
-    else:
-
-        session = "CLOSED"
-
-        session_label = "[color=#FF9900][b][ZAMKNIĘTY][/b][/color]"
-
-        # KLUCZOWA POPRAWKA
-        if regular_price > 0:
-            price = regular_price
-        else:
-            price = prev_close
-
-    if price <= 0:
-        price = prev_close
-
-    if prev_close > 0 and price > 0:
-
-        change_amt = price - prev_close
-
-        change_pct = (
-            (change_amt / prev_close) * 100
-        )
-
-    else:
-
-        change_amt = 0.0
-
-        change_pct = 0.0
+    labels = {
+        "PRE": "[color=#0000FF][b][PRE-MARKET][/b][/color]",
+        "REGULAR": "[color=#00AA00][b][MARKET OPEN][/b][/color]",
+        "POST": "[color=#800080][b][POST-MARKET][/b][/color]",
+        "CLOSED": "[color=#FF9900][b][ZAMKNIĘTY][/b][/color]",
+    }
 
     return {
         "session": session,
-        "session_label": session_label,
-        "price": price,
-        "change_amt": change_amt,
-        "change_pct": change_pct,
-        "prev_close": prev_close,
+        "session_label": labels.get(session, labels["CLOSED"]),
+        "price": resolved["active_price"],
+        "change_amt": resolved["change_amt"],
+        "change_pct": resolved["change_pct"],
+        "prev_close": resolved["prev_close"],
     }
-
-
 
 
 def add_cache_items(app, items: dict, visible_symbols=None, keep_symbols=None):
