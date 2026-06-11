@@ -37,3 +37,5 @@ android.entrypoint = org.kivy.android.PythonActivity
 android.archs = arm64-v8a,armeabi-v7a
 
 services = ScanerService:service.py
+
+[buildozer]
