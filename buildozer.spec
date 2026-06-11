@@ -44,7 +44,7 @@ android.entrypoint = org.kivy.android.PythonActivity
 
 android.services = stockscanner:service.py
 
-android.build_tools = 34.0.0
+android.build_tools_version = 34.0.0
 
 android.release_artifact = apk
 
