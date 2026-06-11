@@ -36,6 +36,4 @@ android.entrypoint = org.kivy.android.PythonActivity
 
 android.archs = arm64-v8a,armeabi-v7a
 
-android.services = ScanerService:service.py
-
-warn_on_root = 0
+services = ScanerService:service.py
