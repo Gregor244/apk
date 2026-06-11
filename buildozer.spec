@@ -39,4 +39,3 @@ android.archs = arm64-v8a,armeabi-v7a
 android.services = ScanerService:service.py
 
 warn_on_root = 0
-log_level = 2
