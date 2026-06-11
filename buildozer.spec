@@ -59,9 +59,6 @@ p4a.branch = stable
 # STABILNOŚĆ
 warn_on_root = 1
 
-# REDUKCJA OOM
-android.release_artifact = apk
-
 # BUILD CACHE
 build_dir = .buildozer
 
