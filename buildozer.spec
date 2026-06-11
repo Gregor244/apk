@@ -1,68 +1,81 @@
 [app]
-# (str) Title of your application
+
 title = StockScannerPro
 
-# (str) Package name
 package.name = stockscannerpro
-
-# (str) Package domain
 package.domain = org.gregor244
 
-# (str) App version — wymagane przez Buildozer
-version = 1.0
-
-# (str) Source code where the main.py lives
 source.dir = .
 
-# (str) Source files to include
+# (str) Icon of the application
+icon.filename = %(source.dir)s/icon.png
+
 source.include_exts = py,png,jpg,jpeg,kv,atlas,json
 
-# (list) Application requirements
-requirements = python3,kivy,kivymd,requests,urllib3,certifi,plyer,idna,chardet
+version = 1.0
 
-# (str) Supported orientation
+requirements = python3,kivy,kivymd,requests,urllib3,certifi,idna,chardet,plyer
+
 orientation = portrait
 
-# (bool) Start in fullscreen
 fullscreen = 0
 
-# (bool) Allow rotation
 allow_rotation = 0
 
-# (int) Log level
 log_level = 2
 
-# (str) Android entry point
-android.entrypoint = org.kivy.android.PythonActivity
-
-# (list) Permissions
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,POST_NOTIFICATIONS,FOREGROUND_SERVICE,WAKE_LOCK
-
-# (list) Android architectures
-android.archs = arm64-v8a,armeabi-v7a
-
-# (str) Android API
 android.api = 34
-
-# (str) Android minimum API
 android.minapi = 24
 
-# (str) Android SDK version
-android.sdk = 24
+android.sdk = 34
 
-# (str) Android NDK version
 android.ndk = 25b
 
-# (str) Services
+android.accept_sdk_license = True
+
+android.archs = arm64-v8a,armeabi-v7a
+
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,POST_NOTIFICATIONS,WAKE_LOCK,FOREGROUND_SERVICE
+
+android.allow_backup = True
+
+android.enable_androidx = True
+
+android.gradle_dependencies =
+
+android.add_packaging_options =
+
+android.presplash_color = #101010
+
+android.entrypoint = org.kivy.android.PythonActivity
+
 android.services = stockscanner:service.py
 
-[buildozer]
-# (int) Log level
-log_level = 2
+p4a.branch = master
 
-# (bool) Warn on root usage
+KLUCZOWE:
+
+android.skip_update = False
+
+WYMUSZENIE STABILNYCH BUILD TOOLS
+
+android.build_tools = 34.0.0
+
+STABILNOŚĆ
+
+osx.python_version = 3
+osx.kivy_version = 2.3.0
+
+REDUKCJA CRASHY
+
 warn_on_root = 1
 
-[app:android]
-# (str) Preset name for Android packaging
-android.p4a_dir =
+LOGI
+
+log_level = 2
+
+[buildozer]
+
+log_level = 2
+
+warn_on_root = 1
