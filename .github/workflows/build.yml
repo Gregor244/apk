@@ -26,7 +26,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-
+  
       - name: Install system dependencies
         run: |
           sudo apt update
@@ -43,6 +43,10 @@ jobs:
       - name: Upgrade pip
         run: |
           python -m pip install --upgrade pip setuptools wheel
+          
+          buildozer clean
+          rm -rf .buildozer
+          rm -rf ~/.local/share/python-for-android
 
       - name: Install Buildozer (FORCE STABLE)
         run: |
