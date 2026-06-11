@@ -105,7 +105,12 @@ PL_DAYS = {
 # --- NARZĘDZIA POMOCNICZE ---
 
 def safe_ui(callback, *args, **kwargs):
-    Clock.schedule_once(lambda dt: callback(*args, **kwargs))
+    def _wrapped(dt):
+        try:
+            callback(*args, **kwargs)
+        except Exception as exc:
+            print(f"[UI CALLBACK ERROR] {exc}")
+    Clock.schedule_once(_wrapped, 0)
 
 # ==============================
 #         PRICE ENGINE
@@ -738,37 +743,25 @@ def is_merger_mna_title(title):
 _THREAD_LOCAL = threading.local()
 
 def safe_request(url, timeout=8, retries=MAX_RETRIES, headers=None, **kwargs):
-
     headers = headers or HEADERS
-
     verify = kwargs.pop("verify", certifi.where())
-
     session = _get_http_session()
-
     last_exc = None
 
     for i in range(retries):
-
         try:
-
             now = time.time()
-
             host = "default"
-
             try:
                 host = url.split("/")[2]
             except Exception:
                 pass
 
             with REQUEST_CACHE_LOCK:
-
                 last_time = LAST_REQUEST_TIME.get(host, 0)
-
                 diff = now - last_time
-
                 if diff < REQUEST_DELAY:
                     time.sleep(REQUEST_DELAY - diff)
-
                 LAST_REQUEST_TIME[host] = time.time()
 
             response = session.get(
@@ -783,26 +776,20 @@ def safe_request(url, timeout=8, retries=MAX_RETRIES, headers=None, **kwargs):
                 return response
 
             if response.status_code in (429, 500, 502, 503, 504):
-
                 time.sleep(min(1.2 * (i + 1), 2.5))
                 continue
 
             return response
 
         except Exception as exc:
-
-            last_exc = e
-
+            last_exc = exc
             time.sleep(1.0 * (i + 1))
 
     print(f"[SAFE REQUEST ERROR] {url} | {last_exc}")
 
     class _DummyResponse:
-
         status_code = 0
-
         text = ""
-
         def json(self):
             return {}
 
@@ -902,9 +889,20 @@ def queue_service_event(event_type, title, message, key, extra=None):
             json.dump(payload, f, ensure_ascii=False)
         return True
     except Exception as exc:
-        print(f"queue_service_event error: {e}")
+        print(f"queue_service_event error: {exc}")
         return False
-
+        
+def safe_json(response):
+    try:
+        if not response or getattr(response, "status_code", 0) != 200:
+            return {}
+        ctype = response.headers.get("Content-Type", "")
+        if "json" not in ctype.lower():
+            return {}
+        return response.json()
+    except Exception:
+        return {}
+        
 def read_service_ack():
     paths = _service_paths()
     if not os.path.exists(paths["ack"]):
@@ -926,7 +924,7 @@ def start_foreground_service():
         service.start("Skaner Gieldy USA działa w tle")
         return True
     except Exception as exc:
-        print(f"start_foreground_service error: {e}")
+        print(f"start_foreground_service error: {exc}")
         return False
 
 
@@ -1038,7 +1036,7 @@ def fetch_top_gainers_by_type(scr_id="day_gainers"):
     try:
         res = safe_request(url, headers=HEADERS, timeout=5)
         if res.status_code == 200:
-            result = res.json().get('finance', {}).get('result')
+            result = safe_json(res).get('finance', {}).get('result')
             if result and isinstance(result, list) and len(result) > 0:
                 quotes = result[0].get('quotes', [])
                 symbols = [q['symbol'] for q in quotes if 'symbol' in q]
@@ -2531,7 +2529,7 @@ class NewsTab(ScrollableTab):
             try:
                 res = safe_request(url, headers=HEADERS, timeout=8)
                 if res.status_code == 200:
-                    for n in res.json().get("news", []):
+                    for n in payload = safe_json(res).get("news", []):
                         pub_time = n.get('providerPublishTime', 0)
                         if pub_time < timestamp_threshold:
                             continue
@@ -2553,7 +2551,7 @@ class NewsTab(ScrollableTab):
         try:
             res = safe_request(fallback_url, headers=HEADERS, timeout=6)
             if res.status_code == 200:
-                for n in res.json().get("news", []):
+                for n in payload = safe_json(res).get("news", []):
                     pub_time = n.get('providerPublishTime', 0)
                     if pub_time < timestamp_threshold:
                         continue
