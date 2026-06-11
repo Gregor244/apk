@@ -33,6 +33,7 @@ from kivymd.uix.button import MDRaisedButton
 from kivymd.uix.textfield import MDTextField
 from kivy.uix.scrollview import ScrollView
 from kivymd.uix.snackbar import MDSnackbar
+
 try:
     from android import mActivity
     from android import AndroidService
@@ -238,7 +239,7 @@ class PriceEngine:
 
             return round(macd_val, 3), round(sig_val, 3), round(hist, 3)
 
-            except Exception:
+        except Exception:
             return 0.0, 0.0, 0.0
 
     # ---------------- SMA ----------------
@@ -340,7 +341,7 @@ def format_market_cap(val):
         if val >= 1000: return f"{val/1000:.0f} tys. USD"
         return f"{val:.0f} USD"
     except Exception:
-    return "Brak"
+        return "Brak"
 
 
 
@@ -502,6 +503,8 @@ def resolve_active_price(data):
 
 def get_cached_analysis(sym, closes, price, vol, avg_vol):
     return PriceEngine.analyze(sym, closes, price, vol, avg_vol)
+
+_THREAD_LOCAL = threading.local()
 
 def _get_http_session():
     sess = getattr(_THREAD_LOCAL, "session", None)
@@ -739,8 +742,6 @@ def is_merger_mna_title(title):
         "go private", "going-private", "potential acquisition", "potential buyout",
         "exploring sale", "explores sale", "received a bid", "considering sale"
     ])
-    
-_THREAD_LOCAL = threading.local()
 
 def safe_request(url, timeout=8, retries=MAX_RETRIES, headers=None, **kwargs):
     headers = headers or HEADERS
@@ -1044,7 +1045,7 @@ def fetch_top_gainers_by_type(scr_id="day_gainers"):
                     REQUEST_CACHE[cache_key] = {"ts": now_ts, "data": symbols}
                 return symbols
     except Exception as exc:
-        print(f"fetch_top_gainers_by_type error {scr_id}: {e}")
+        print(f"fetch_top_gainers_by_type error {scr_id}: {exc}")
     return []
 
 
@@ -1063,25 +1064,13 @@ def fetch_dynamic_universe(limit=90):
         try:
             tickers.extend(fetch_top_gainers_by_type(scr)[:15])
         except Exception as exc:
-            print(f"fetch_dynamic_universe error {scr}: {e}")
+            print(f"fetch_dynamic_universe error {scr}: {exc}")
     tickers.extend([
         "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD",
         "NFLX", "AVGO", "ORCL", "JPM", "COST", "PANW", "LLY", "MA",
         "SMCI", "PLTR", "UBER", "QCOM", "MU", "INTC", "BAC", "WMT"
     ])
     return list(dict.fromkeys(tickers))[:max(1, int(limit))]
-
-
-# --- THREAD LOCAL HTTP SESSION ---
-_THREAD_LOCAL = threading.local()
-
-def _get_http_session():
-    sess = getattr(_THREAD_LOCAL, "session", None)
-    if sess is None:
-        sess = requests.Session()
-        sess.headers.update(HEADERS)
-        _THREAD_LOCAL.session = sess
-    return sess
 
 def fetch_ticker_data(ticker):
     ticker = (ticker or "").strip().upper()
@@ -1160,7 +1149,7 @@ def fetch_ticker_data(ticker):
                 res_data['post_change_pct'] = safe_number(q.get('postMarketChangePercent', 0.0), 0.0)
                 res_data['post_change_amt'] = safe_number(q.get('postMarketChange', 0.0), 0.0)
     except Exception as exc:
-        print(f"fetch_ticker_data quote error {ticker}: {e}")
+        print(f"fetch_ticker_data quote error {ticker}: {exc}")
 
     # Daily history for indicators
     try:
@@ -1188,7 +1177,7 @@ def fetch_ticker_data(ticker):
                 if len(volumes) >= 2:
                     res_data['volume_trend'] = "[color=#00AA00]Rosnący 📈[/color]" if volumes[-1] > volumes[-2] else "[color=#FF0000]Spadający 📉[/color]"
     except Exception as exc:
-        print(f"fetch_ticker_data chart error {ticker}: {e}")
+        print(f"fetch_ticker_data chart error {ticker}: {exc}")
 
     # Intraday live price (pre / regular / post) to avoid stale close-only prices.
     session_state = get_pl_session_hint()
@@ -1206,7 +1195,7 @@ def fetch_ticker_data(ticker):
                 if live_price <= 0:
                     live_price = safe_number(meta.get('currentPrice', 0.0), 0.0)
     except Exception as exc:
-        print(f"fetch_ticker_data intraday error {ticker}: {e}")
+        print(f"fetch_ticker_data intraday error {ticker}: {exc}")
 
     if live_price > 0:
         res_data['session_price'] = live_price
@@ -1260,12 +1249,7 @@ def fetch_ticker_data(ticker):
                     if pe_v:
                         res_data['pe'] = f"{pe_v:.2f}"
         except Exception as exc:
-            print(f"fetch_ticker_data finnhub fallback error {ticker}: {e}")
-
-    # Final, consistent change vs prev close. This avoids zero/absurd differences from stale quote fields.
-    #if res_data['prev_close'] > 0 and res_data['price'] > 0:
-        #res_data['change_amt'] = res_data['price'] - res_data['prev_close']
-        #res_data['change_pct'] = (res_data['change_amt'] / res_data['prev_close']) * 100 if res_data['prev_close'] else 0.0
+            print(f"fetch_ticker_data finnhub fallback error {ticker}: {exc}")
 
     if datetime.now().weekday() >= 5:
         res_data['market_state'] = "CLOSED"
@@ -1279,9 +1263,9 @@ def fetch_ticker_data(ticker):
 
     with REQUEST_CACHE_LOCK:
         REQUEST_CACHE[cache_key] = {
-    "ts": now_ts,
-    "data": dict(res_data)
-}
+            "ts": now_ts,
+            "data": dict(res_data)
+        }
 
     return res_data
 
@@ -1328,7 +1312,7 @@ def fetch_bulk_ticker_data_serial(tickers, chunk_size=8):
                 if data and safe_number(data.get('price', 0.0), 0.0) > 0:
                     bulk_results[ticker] = data
             except Exception as exc:
-                print(f"fetch_bulk_ticker_data_serial error {ticker}: {e}")
+                print(f"fetch_bulk_ticker_data_serial error {ticker}: {exc}")
     return bulk_results
 
 def ensure_symbol_cache(symbols, app=None, trim=False, visible_symbols=None):
@@ -1448,16 +1432,16 @@ def fetch_finnhub_ticker_data(ticker):
                     if react_req.status_code == 200:
                         results = react_req.json().get('chart', {}).get('result', [])
 
-                    if results:
-                        react_data = results[0]
-                        react_closes = react_data.get('indicators', {}).get('quote', [{}])[0].get('close', [])
-                        valid_c = [c for c in react_closes if c is not None]
-                        if len(valid_c) >= 2 and valid_c[0]:
-                            r_pct = ((valid_c[-1] - valid_c[0]) / valid_c[0]) * 100
-                            r_znak = "+" if r_pct > 0 else ""
-                            res_data['earnings_reaction'] = f"[b][color={'#00AA00' if r_pct>0 else '#FF0000'}]{r_znak}{r_pct:.2f}%[/color][/b]"
+                        if results:
+                            react_data = results[0]
+                            react_closes = react_data.get('indicators', {}).get('quote', [{}])[0].get('close', [])
+                            valid_c = [c for c in react_closes if c is not None]
+                            if len(valid_c) >= 2 and valid_c[0]:
+                                r_pct = ((valid_c[-1] - valid_c[0]) / valid_c[0]) * 100
+                                r_znak = "+" if r_pct > 0 else ""
+                                res_data['earnings_reaction'] = f"[b][color={'#00AA00' if r_pct>0 else '#FF0000'}]{r_znak}{r_pct:.2f}%[/color][/b]"
                 except Exception as exc:
-                    print(f"earnings reaction error {ticker}: {e}")
+                    print(f"earnings reaction error {ticker}: {exc}")
 
         earn_cal = safe_request(f"{base_url}/calendar/earnings", params={"symbol": ticker, "from": today.strftime('%Y-%m-%d'), "to": future.strftime('%Y-%m-%d'), "token": FINNHUB_KEY}, timeout=5).json()
         if 'earningsCalendar' in earn_cal and earn_cal['earningsCalendar']:
@@ -1482,7 +1466,7 @@ def fetch_finnhub_ticker_data(ticker):
 
         res_data['found'] = True
     except Exception as exc:
-        print(f"Błąd Finnhub: {e}")
+        print(f"Błąd Finnhub: {exc}")
         res_data['found'] = res_data['price'] > 0
 
     if res_data['name'] == ticker:
@@ -1490,9 +1474,11 @@ def fetch_finnhub_ticker_data(ticker):
 
     with REQUEST_CACHE_LOCK:
         REQUEST_CACHE[cache_key] = {
-    "ts": now_ts,
-    "data": dict(res_data)
-}
+            "ts": now_ts,
+            "data": dict(res_data)
+        }
+
+    return res_data
 
 
 # --- ANALIZA TECHNICZNA ---
@@ -1575,7 +1561,7 @@ class ScrollableTab(MDTabsBase, MDBoxLayout):
         try:
             self._fetch(*args, **kwargs)
         except Exception as exc:
-            print(f"Błąd pobierania w zakładce: {e}")
+            print(f"Błąd pobierania w zakładce: {exc}")
             Clock.schedule_once(lambda dt: self._show_error("Błąd połączenia. Spróbuj później."))
         finally:
             def _finish(_dt):
@@ -1585,7 +1571,7 @@ class ScrollableTab(MDTabsBase, MDBoxLayout):
                     try:
                         app.finish_tab_refresh(self)
                     except Exception as exc:
-                        print(f"finish_tab_refresh error: {e}")
+                        print(f"finish_tab_refresh error: {exc}")
             Clock.schedule_once(_finish, 0)
 
     def _fetch(self, *args, **kwargs): pass
@@ -1659,7 +1645,7 @@ class InfoTab(ScrollableTab):
             "[b]Histogram[/b] — MACD minus sygnał; dodatni zwykle wspiera kupno, ujemny osłabia momentum.\n"
             "[b]P/E[/b] — cena do zysku; niższe bywa tańsze, ale porównuj tylko spółki z podobnej branży.\n\n"
             "[b]Jak czytać kolory[/b]\n"
-            "Zielony oznacza zwykle sygnał wzrostowy / lepszą pozycję względem średniej.\n"
+            "Zielony oznacza zwykle sygnał wzrostowy / lepszą position względem średniej.\n"
             "Czerwony sygnalizuje presję spadkową lub słabszy sygnał, a szary neutralne / brak przewagi."
         )
 
@@ -1673,9 +1659,9 @@ class InfoTab(ScrollableTab):
         self.glossary_card.size_hint_y = None
         if not initial:
             try:
-    self.glossary_card.lbl.texture_update()
-except Exception:
-    pass
+                self.glossary_card.lbl.texture_update()
+            except Exception:
+                pass
 
     def toggle_glossary(self):
         self._glossary_visible = not self._glossary_visible
@@ -1814,7 +1800,7 @@ class SkanerTab(ScrollableTab):
                     if isinstance(saved, list) and saved:
                         self.static_tickers = saved
             except Exception as exc:
-                print(f"load_stored_data skaner: {e}")
+                print(f"load_stored_data skaner: {exc}")
 
     def save_stored_data(self):
         app = MDApp.get_running_app()
@@ -1826,7 +1812,7 @@ class SkanerTab(ScrollableTab):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.static_tickers, f)
         except Exception as exc:
-            print(f"save_stored_data skaner: {e}")
+            print(f"save_stored_data skaner: {exc}")
 
     def add_ticker(self, *a):
         t = self.input_field.text.strip().upper()
@@ -1872,7 +1858,7 @@ class SkanerTab(ScrollableTab):
         try:
             self._fetch(*args, **kwargs)
         except Exception as exc:
-            print(f"Błąd pobierania w SkanerTab: {e}")
+            print(f"Błąd pobierania w SkanerTab: {exc}")
             safe_ui(self._show_error, "Błąd połączenia. Spróbuj później.")
         finally:
             def _finish(_dt):
@@ -1889,7 +1875,7 @@ class SkanerTab(ScrollableTab):
             gainers_open = fetch_top_gainers_by_type("day_gainers")[:10]
             gainers_post = fetch_top_gainers_by_type("after_hours_gainers")[:10]
         except Exception as exc:
-            print(f"Skaner screener error: {e}")
+            print(f"Skaner screener error: {exc}")
             gainers_pre, gainers_open, gainers_post = [], [], []
 
         pre_set = set(gainers_pre)
@@ -1918,7 +1904,7 @@ class SkanerTab(ScrollableTab):
                 if partial:
                     bulk_data.update(partial)
             except Exception as exc:
-                print(f"bulk chunk error: {e}")
+                print(f"bulk chunk error: {exc}")
             time.sleep(0.2)
 
         add_cache_items(app, bulk_data, visible_symbols=all_tickers)
@@ -1929,7 +1915,7 @@ class SkanerTab(ScrollableTab):
             try:
                 app.send_notification("Skaner", f"Zaktualizowano wyniki dla {len(signature)} spółek.")
             except Exception as exc:
-                print(f"Skaner notification error: {e}")
+                print(f"Skaner notification error: {exc}")
 
         for sym in all_tickers:
             try:
@@ -2002,7 +1988,7 @@ class SkanerTab(ScrollableTab):
                 cards_data.append(txt)
 
             except Exception as exc:
-                print(f"Skaner card error {sym}: {e}")
+                print(f"Skaner card error {sym}: {exc}")
 
         self.last_update_text = timestamp_text()
         safe_ui(self._render, cards_data)
@@ -2047,9 +2033,9 @@ class SkanerTab(ScrollableTab):
             )
         )
         btn = MDRaisedButton(
-    text="Ponów próbę",
-    on_release=lambda x: self.refresh_data()
-)
+            text="Ponów próbę",
+            on_release=lambda x: self.refresh_data()
+        )
         self.content.add_widget(btn)
 
 
@@ -2088,16 +2074,16 @@ class TickerTab(ScrollableTab):
         closes = data.get('closes', [])
         volumes = data.get('volumes', [])
 
-        sma14 = calc_sma(closes, 14, p)
-        sma30 = calc_sma(closes, 30, p)
-        sma50 = calc_sma(closes, 50, p)
-        sma90 = calc_sma(closes, 90, p)
-        sma200 = calc_sma(closes, 200, p)
+        sma14 = PriceEngine.sma(closes, 14, p)
+        sma30 = PriceEngine.sma(closes, 30, p)
+        sma50 = PriceEngine.sma(closes, 50, p)
+        sma90 = PriceEngine.sma(closes, 90, p)
+        sma200 = PriceEngine.sma(closes, 200, p)
 
-        rsi = calculate_rsi(closes, 14) if len(closes) > 14 else 50.0
-        macd, sig, _ = calculate_macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
+        rsi = PriceEngine.rsi(closes, 14) if len(closes) > 14 else 50.0
+        macd, sig, hist = PriceEngine.macd(closes) if len(closes) > 35 else (0.0, 0.0, 0.0)
         hist = calculate_histogram(macd, sig)
-        trade_score, trade_signal_text, trade_signal_color = calculate_signal_strength(rsi, macd, sig, hist=hist, price=p, sma14=sma14, sma30=sma30, sma90=sma90, volume=data.get('vol',0), avg_volume=data.get('avg_vol',0))
+        trade_score, trade_signal_text, trade_signal_color = PriceEngine.signal(rsi, macd, sig, hist, p, sma14, sma30, sma90, data.get('vol',0), data.get('avg_vol',0))
         trade_signal = color_wrap(f"[b]{trade_signal_text}[/b]", trade_signal_color)
 
         vol_trend = "Brak"
@@ -2105,7 +2091,7 @@ class TickerTab(ScrollableTab):
             valid_vols = [v for v in volumes[-5:] if isinstance(v, (int, float))]
             if len(valid_vols) >= 3:
                 avg_vol = sum(valid_vols) / len(valid_vols)
-            vol_trend = color_wrap("Powyżej śred.", "#00AA00") if data.get('vol', 0) > avg_vol else color_wrap("Poniżej śred.", "#FF0000")
+                vol_trend = color_wrap("Powyżej śred.", "#00AA00") if data.get('vol', 0) > avg_vol else color_wrap("Poniżej śred.", "#FF0000")
 
         rec_text = color_wrap("[b]ZDECYDOWANIE TAK[/b]", "#00AA00") if trade_score >= 4.5 else (
             color_wrap("[b]NEUTRALNIE[/b]", "#FF9900") if trade_score >= 0 else color_wrap("[b]NIE / RYZYKO[/b]", "#FF0000")
@@ -2388,7 +2374,7 @@ class KatalizatoryTab(ScrollableTab):
             self.last_update_text = timestamp_text()
             Clock.schedule_once(lambda dt: self._render(final_cal, micro_cap_news, pre_catalyst_cards, mna_cards, fda_cards))
         except Exception as exc:
-            print(f"Katalizatory error: {e}")
+            print(f"Katalizatory error: {exc}")
 
     def _render(self, calendar, micro_cap_news, pre_catalyst_cards, mna_cards, fda_cards):
         self.content.clear_widgets()
@@ -2453,7 +2439,7 @@ class NewsTab(ScrollableTab):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"date": datetime.now().date().isoformat(), "items": self._daily_items[-40:]}, f, ensure_ascii=False)
         except Exception as exc:
-            print(f"News save error: {e}")
+            print(f"News save error: {exc}")
 
     def _pr_key(self, ticker, title):
         return f"{(ticker or 'RYNEK').strip().upper()}|{(title or '').strip().lower()}"
@@ -2465,7 +2451,7 @@ class NewsTab(ScrollableTab):
         key = item.get("key")
         if not key:
             return False
-        if self._daily_keys = set()
+        if any(existing.get("key") == key for existing in self._daily_items):
             return False
         self._daily_items.append(item)
         return True
@@ -2520,7 +2506,7 @@ class NewsTab(ScrollableTab):
                             if app:
                                 app.send_notification(f"PR / Catalyst: {ticker}", title)
                         except Exception as exc:
-                            print(f"PR notification error: {e}")
+                            print(f"PR notification error: {exc}")
 
         # PR / watchlist news
         if watch_list:
@@ -2529,7 +2515,8 @@ class NewsTab(ScrollableTab):
             try:
                 res = safe_request(url, headers=HEADERS, timeout=8)
                 if res.status_code == 200:
-                    for n in payload = safe_json(res).get("news", []):
+                    payload = safe_json(res).get("news", [])
+                    for n in payload:
                         pub_time = n.get('providerPublishTime', 0)
                         if pub_time < timestamp_threshold:
                             continue
@@ -2544,14 +2531,15 @@ class NewsTab(ScrollableTab):
                         elif any(t in watch_list for t in rel):
                             add_news(ticker, title, link, publisher, "WATCHLIST", cap_raw, notify=False)
             except Exception as exc:
-                print(f"News watchlist error: {e}")
+                print(f"News watchlist error: {exc}")
 
         # General market fallback + PR retention
         fallback_url = "https://query2.finance.yahoo.com/v1/finance/search?q=stocks market trading federal reserve economy&newsCount=20"
         try:
             res = safe_request(fallback_url, headers=HEADERS, timeout=6)
             if res.status_code == 200:
-                for n in payload = safe_json(res).get("news", []):
+                payload = safe_json(res).get("news", [])
+                for n in payload:
                     pub_time = n.get('providerPublishTime', 0)
                     if pub_time < timestamp_threshold:
                         continue
@@ -2566,7 +2554,7 @@ class NewsTab(ScrollableTab):
                     elif ticker != "RYNEK":
                         add_news(ticker, title, link, publisher, "RYNEK", cap_raw, notify=False)
         except Exception as exc:
-            print(f"News fallback error: {e}")
+            print(f"News fallback error: {exc}")
 
         self._save_daily_items()
         self.last_update_text = timestamp_text()
@@ -2698,7 +2686,7 @@ class CfdShortTab(ScrollableTab):
         try:
             self._fetch(*args, **kwargs)
         except Exception as exc:
-            print(f"Błąd pobierania w CfdShortTab: {e}")
+            print(f"Błąd pobierania w CfdShortTab: {exc}")
             safe_ui(self._show_error, "Błąd połączenia. Spróbuj później.")
         finally:
             def _finish(_dt):
@@ -2732,7 +2720,7 @@ class CfdShortTab(ScrollableTab):
                     if partial:
                         bulk_data.update(partial)
                 except Exception as exc:
-                    print(f"CFD chunk error: {e}")
+                    print(f"CFD chunk error: {exc}")
                 time.sleep(0.2)
 
             add_cache_items(app, bulk_data, visible_symbols=required)
@@ -2765,7 +2753,7 @@ class CfdShortTab(ScrollableTab):
                 vol = int(data.get("vol", 0) or 0)
 
                 analysis = PriceEngine.analyze(
-                    self, sym, closes, p, vol, data.get("avg_vol", 0)
+                    sym, closes, p, vol, data.get("avg_vol", 0)
                 )
 
                 sma14 = analysis["sma14"]
@@ -2839,7 +2827,7 @@ class CfdShortTab(ScrollableTab):
                     break
 
             except Exception as exc:
-                print(f"CFD analyze error {sym}: {e}")
+                print(f"CFD analyze error {sym}: {exc}")
 
         a_candidates.sort(key=lambda x: x["score"], reverse=True)
         b_candidates.sort(key=lambda x: x["score"], reverse=True)
@@ -2867,7 +2855,7 @@ class CfdShortTab(ScrollableTab):
                 if app:
                     app.send_notification(title, message)
             except Exception as exc:
-                print(f"Notification error: {e}")
+                print(f"Notification error: {exc}")
 
         def format_row(row, show_tp_sl=False, show_diff=False):
             p = row["p"]
@@ -2999,7 +2987,7 @@ class StockScannerPro(MDApp):
             if platform == 'android':
                 request_permissions(["android.permission.POST_NOTIFICATIONS"])
         except Exception as exc:
-            print(f"Błąd przy żądaniu uprawnień: {e}")
+            print(f"Błąd przy żądaniu uprawnień: {exc}")
 
         init_service_bridge()
         start_foreground_service()
@@ -3020,12 +3008,12 @@ class StockScannerPro(MDApp):
         # Start one refresh at a time so startup does not overload Android.
         delays = [0.5, 3.0, 5.5, 8.0, 10.5, 13.0]
         for idx, tab in enumerate(self.tabs_instances):
-    if hasattr(tab, 'load_data_if_needed'):
-        delay = delays[idx]
-        Clock.schedule_once(
-            lambda dt, t=tab: t.load_data_if_needed(),
-            delay
-        )
+            if hasattr(tab, 'load_data_if_needed'):
+                delay = delays[idx] if idx < len(delays) else 15.0
+                Clock.schedule_once(
+                    lambda dt, t=tab: t.load_data_if_needed(),
+                    delay
+                )
 
         self._start_background_scheduler()
 
@@ -3043,7 +3031,7 @@ class StockScannerPro(MDApp):
             try:
                 self.cron_time_checker(0)
             except Exception as exc:
-                print(f"Scheduler loop error: {e}")
+                print(f"Scheduler loop error: {exc}")
             time.sleep(30)
 
     def _find_tab(self, cls):
@@ -3073,7 +3061,7 @@ class StockScannerPro(MDApp):
         try:
             tab._begin_refresh(*args, **kwargs)
         except Exception as exc:
-            print(f"Queued refresh start error: {e}")
+            print(f"Queued refresh start error: {exc}")
             self.finish_tab_refresh(tab)
 
     def finish_tab_refresh(self, tab):
@@ -3102,12 +3090,12 @@ class StockScannerPro(MDApp):
                 if kat:
                     kat.refresh_data(True)
             except Exception as exc:
-                print(f"Scheduled katalizatory refresh error: {e}")
+                print(f"Scheduled katalizatory refresh error: {exc}")
             try:
                 if news:
                     news.refresh_data()
             except Exception as exc:
-                print(f"Scheduled news refresh error: {e}")
+                print(f"Scheduled news refresh error: {exc}")
 
         Clock.schedule_once(_do_refresh, 0)
 
@@ -3125,11 +3113,11 @@ class StockScannerPro(MDApp):
 
     def on_resume(self):
         if not self.app_ready:
-    return True
+            return True
 
     def cron_time_checker(self, dt):
         if not self.app_ready:
-    return True
+            return True
 
     def send_notification(self, title, message):
         title = str(title or "").strip()[:80]
@@ -3141,7 +3129,7 @@ class StockScannerPro(MDApp):
                 notification.notify(title=title, message=message, app_name='StockScanner', timeout=10)
                 delivered = True
         except Exception as exc:
-            print(f"Błąd powiadomienia Plyer: {e}")
+            print(f"Błąd powiadomienia Plyer: {exc}")
 
         if not delivered:
             try:
@@ -3153,7 +3141,7 @@ class StockScannerPro(MDApp):
                     {"source": "send_notification"},
                 )
             except Exception as exc:
-                print(f"Błąd kolejki powiadomień: {ex}")
+                print(f"Błąd kolejki powiadomień: {exc}")
 
 if __name__ == '__main__':
     StockScannerPro().run()
