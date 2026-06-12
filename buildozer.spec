@@ -20,7 +20,7 @@ log_level = 2
 android.api = 33
 android.minapi = 24
 android.ndk_api = 24
-android.ndk = 25b
+android.ndk = 25c
 android.sdk = 33
 android.build_tools_version = 33.0.2
 
@@ -35,10 +35,16 @@ android.allow_backup = True
 android.presplash_color = #101010
 android.entrypoint = org.kivy.android.PythonActivity
 
+android.gradle_dependencies = 
+
+android.enable_androidx = True
+
 android.archs = arm64-v8a,armeabi-v7a
 
 services = ScanerService:service.py
 
 p4a.branch = develop
+p4a.fork = kivy
+p4a.branch = master
 
 [buildozer]
