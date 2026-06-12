@@ -42,7 +42,6 @@ android.archs = arm64-v8a,armeabi-v7a
 
 services = ScanerService:service.py
 
-p4a.branch = develop
 p4a.fork = kivy
 p4a.branch = master
 
