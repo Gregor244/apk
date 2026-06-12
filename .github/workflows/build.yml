@@ -59,11 +59,6 @@ jobs:
           which buildozer
           buildozer --version
 
-      - name: Force Android NDK 25b
-        run: |
-          echo "ANDROID_NDK_HOME=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
-          echo "ANDROID_NDK=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$HOME/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
 
       - name: Build APK
         run: |
