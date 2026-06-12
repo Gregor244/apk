@@ -29,6 +29,8 @@ jobs:
 
       - name: Install system dependencies
         run: |
+         sudo apt update
+         
          sudo apt install -y \
           zip unzip tar wget curl git \
           build-essential autoconf automake libtool pkg-config \
