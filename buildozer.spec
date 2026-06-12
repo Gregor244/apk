@@ -39,6 +39,6 @@ android.archs = arm64-v8a,armeabi-v7a
 
 services = ScanerService:service.py
 
-p4a.branch = stable
+p4a.branch = develop
 
 [buildozer]
