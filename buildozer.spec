@@ -37,7 +37,6 @@ android.entrypoint = org.kivy.android.PythonActivity
 
 android.gradle_dependencies = 
 
-android.enable_androidx = True
 
 android.archs = arm64-v8a,armeabi-v7a
 
