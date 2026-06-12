@@ -20,7 +20,7 @@ log_level = 2
 android.api = 33
 android.minapi = 24
 android.ndk_api = 24
-android.ndk = 23b
+android.ndk = 25b
 android.sdk = 33
 android.build_tools_version = 33.0.2
 
