@@ -10,7 +10,9 @@ version = 1.2
 
 icon.filename = %(source.dir)s/icon.png
 
-requirements = python3,kivy==2.3.0,kivymd==1.2.0,pillow,requests,plyer,certifi
+# ZAKTUALIZOWANE REQUIREMENTS:
+# Dodano httpx, certifi, anyio (dla obsługi asynchronicznych requestów w Python 3)
+requirements = python3,kivy==2.3.0,kivymd==1.2.0,pillow,httpx,certifi,anyio,idna,sniffio,h11,h2,httpcore
 
 orientation = portrait
 fullscreen = 0
@@ -35,14 +37,17 @@ android.allow_backup = True
 android.presplash_color = #101010
 android.entrypoint = org.kivy.android.PythonActivity
 
+# Pozostawione puste, chyba że potrzebujesz specyficznych bibliotek Java
 android.gradle_dependencies = 
-
 
 android.archs = arm64-v8a,armeabi-v7a
 
+# Jeśli faktycznie używasz zewnętrznego pliku service.py:
 services = ScanerService:service.py
 
 p4a.fork = kivy
 p4a.branch = master
 
 [buildozer]
+log_level = 2
+warn_on_root = 1
