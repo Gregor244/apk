@@ -12,7 +12,7 @@ icon.filename = %(source.dir)s/icon.png
 
 # ZAKTUALIZOWANE REQUIREMENTS:
 # Dodano httpx, certifi, anyio (dla obsługi asynchronicznych requestów w Python 3)
-requirements = python3,kivy==2.3.0,kivymd==1.2.0,pillow,httpx,certifi,anyio,idna,sniffio,h11,h2,httpcore
+requirements = python==3.11,kivy==2.3.0,kivymd==1.2.0,pillow,httpx,certifi,anyio,idna,sniffio,h11,h2,httpcore
 
 orientation = portrait
 fullscreen = 0
@@ -42,11 +42,13 @@ android.gradle_dependencies =
 
 android.archs = arm64-v8a,armeabi-v7a
 
+android.python_version = 3.11
+
 # Jeśli faktycznie używasz zewnętrznego pliku service.py:
 services = ScanerService:service.py
 
 p4a.fork = kivy
-p4a.branch = master
+p4a.branch = develop
 
 [buildozer]
 log_level = 2
