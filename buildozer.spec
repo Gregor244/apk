@@ -1,55 +1,43 @@
 [app]
-title = SkanerGieldyUSA
-package.name = skanergieldy
-package.domain = org.test
+
+title = StockScannerV10
+package.name = stockscannerv10
+package.domain = org.gregor
 
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,kv,atlas,json
+source.include_exts = py,kv,png,jpg,json,txt
 
-version = 1.2
+version = 10.0
 
-icon.filename = %(source.dir)s/icon.png
-
-# ZAKTUALIZOWANE REQUIREMENTS:
-# Dodano httpx, certifi, anyio (dla obsługi asynchronicznych requestów w Python 3)
-requirements = python3,kivy==2.3.0,kivymd==1.2.0,pillow,httpx,certifi,anyio,idna,sniffio,h11,h2,httpcore,websocket-client,numpy
+requirements = python3,kivy,kivymd,httpx,websockets,certifi,pyjnius,plyer
 
 orientation = portrait
 fullscreen = 0
-allow_rotation = 0
-log_level = 2
 
-android.api = 33
-android.minapi = 24
-android.ndk_api = 24
+# Android 14
+android.api = 34
+android.minapi = 26
+android.sdk = 34
 android.ndk = 25b
-android.sdk = 33
-android.build_tools_version = 33.0.2
-
-android.release_artifact = apk
-
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,POST_NOTIFICATIONS,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE,RECEIVE_BOOT_COMPLETED
 
 android.accept_sdk_license = True
 android.enable_androidx = True
-android.allow_backup = True
 
-android.presplash_color = #101010
-android.entrypoint = org.kivy.android.PythonActivity
+# Foreground service + notifications + vibration + boot + battery exemption
+android.permissions = INTERNET,FOREGROUND_SERVICE,POST_NOTIFICATIONS,WAKE_LOCK,VIBRATE,RECEIVE_BOOT_COMPLETED,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,FOREGROUND_SERVICE_DATA_SYNC
 
-# Pozostawione puste, chyba że potrzebujesz specyficznych bibliotek Java
-android.gradle_dependencies = 
+# Foreground websocket service
+services = ScannerService:service.py
 
-android.archs = arm64-v8a,armeabi-v7a
+# FCM dependency prepared for native Firebase wiring
+android.gradle_dependencies = \
+    com.google.firebase:firebase-messaging:24.1.0,\
+    androidx.core:core:1.13.1
 
-android.python_version = 3.11
-
-# Jeśli faktycznie używasz zewnętrznego pliku service.py:
-services = ScanerService:service.py
-
-p4a.fork = kivy
-p4a.branch = develop
+# Optional safety defaults
+android.wakelock = True
+log_level = 2
+warn_on_root = 0
 
 [buildozer]
 log_level = 2
-warn_on_root = 1
