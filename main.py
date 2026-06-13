@@ -7,8 +7,11 @@ import asyncio
 import re
 import threading
 import time
+import webbrowser
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from urllib.parse import quote_plus
+from urllib.parse import quote_plus
 
 import certifi
 import httpx
@@ -154,6 +157,31 @@ def next_us_market_open_text(now=None):
 
     local_open = next_open.astimezone(LOCAL_TZ)
     return f"{local_open.strftime('%d.%m.%Y %H:%M:%S %Z')} (ET: {next_open.strftime('%d.%m.%Y %H:%M:%S %Z')})"
+
+def us_market_hours_text_local():
+    """Render the U.S. session hours in ET and local CET/CEST time."""
+    try:
+        now_ny = datetime.now(NY_TZ)
+        base_date = now_ny.date()
+        pre_start = datetime(base_date.year, base_date.month, base_date.day, 4, 0, tzinfo=NY_TZ).astimezone(LOCAL_TZ)
+        pre_end = datetime(base_date.year, base_date.month, base_date.day, 9, 30, tzinfo=NY_TZ).astimezone(LOCAL_TZ)
+        reg_end = datetime(base_date.year, base_date.month, base_date.day, 16, 0, tzinfo=NY_TZ).astimezone(LOCAL_TZ)
+        post_end = datetime(base_date.year, base_date.month, base_date.day, 20, 0, tzinfo=NY_TZ).astimezone(LOCAL_TZ)
+        return (
+            "[b]Rynek USA — godziny sesji (ET / czas lokalny CET/CEST)[/b]\n"
+            f"• [b]Pre-Market[/b]: 04:00–09:30 ET / {pre_start.strftime('%H:%M')}–{pre_end.strftime('%H:%M %Z')}\n"
+            f"• [b]Sesja główna[/b]: 09:30–16:00 ET / {pre_end.strftime('%H:%M')}–{reg_end.strftime('%H:%M %Z')}\n"
+            f"• [b]Post-Market[/b]: 16:00–20:00 ET / {reg_end.strftime('%H:%M')}–{post_end.strftime('%H:%M %Z')}\n"
+            "• [b]Weekend[/b]: rynek zamknięty"
+        )
+    except Exception:
+        return (
+            "[b]Rynek USA — godziny sesji[/b]\n"
+            "• [b]Pre-Market[/b]: 04:00–09:30 ET\n"
+            "• [b]Sesja główna[/b]: 09:30–16:00 ET\n"
+            "• [b]Post-Market[/b]: 16:00–20:00 ET\n"
+            "• [b]Weekend[/b]: rynek zamknięty"
+        )
 
 def market_status():
     ny = datetime.now(NY_TZ)
@@ -308,6 +336,13 @@ def get_pl_session_hint(now=None):
         return "POSTMARKET"
     return "ZAMKNIĘTY"
 
+def build_catalyst_heading(title, query):
+    return f"[ref={search_url_from_query(query)}][b]{title}[/b][/ref]"
+
+
+def search_url_from_query(query):
+    return f"https://www.google.com/search?q={quote_plus(query)}"
+
 def sanitize_prev_close(price, prev_close, closes):
     price = safe(price, 0.0)
     prev_close = safe(prev_close, 0.0)
@@ -449,6 +484,38 @@ def _fmt_session_price(v):
     v = safe(v, 0.0)
     return f"{v:.2f} USD" if v > 0 else "—"
 
+def session_change_tv(session_state, prev_close, pre_price=0.0, post_price=0.0, last_trade_price=0.0):
+    pc = safe(prev_close, 0.0)
+    pre = safe(pre_price, 0.0)
+    post = safe(post_price, 0.0)
+    last = safe(last_trade_price, 0.0)
+
+    if pc <= 0:
+        return 0.0, 0.0
+
+    # 1. wybór najlepszej dostępnej ceny w zależności od sesji
+    if session_state == "PREMARKET":
+        price = pre or last or pc
+
+    elif session_state == "OTWARTY":
+        # TradingView-like: zawsze ostatni trade
+        price = last or pre or pc
+
+    elif session_state == "POSTMARKET":
+        price = post or last or pc
+
+    else:
+        price = pc
+
+    # 2. fallback bezpieczeństwa
+    if price <= 0:
+        return 0.0, 0.0
+
+    # 3. real-time change vs prev close
+    diff = price - pc
+    pct = (diff / pc) * 100
+
+    return round(diff, 4), round(pct, 2)
 # =========================================
 # FEEDS
 # =========================================
@@ -858,6 +925,13 @@ class PriceEngine:
 class DataCard(MDCard):
     text = StringProperty("")
 
+    def _update_height(self, texture_h=0):
+        try:
+            from kivy.metrics import dp as _dp
+            self.height = max(_dp(84), float(texture_h) + _dp(22))
+        except Exception:
+            pass
+
 class TabRV(RecycleView):
     pass
 
@@ -867,35 +941,37 @@ KV = '''
 <DataCard>:
     orientation: "vertical"
     size_hint_y: None
-    height: dp(160)
-    padding: dp(8)
+    padding: dp(10)
     spacing: dp(6)
     radius: [12, 12, 12, 12]
     elevation: 1
     md_bg_color: 1, 1, 1, 1
+    height: _body.texture_size[1] + dp(24) if _body.texture_size[1] > 0 else dp(84)
 
     MDLabel:
+        id: _body
         text: root.text
         markup: True
         size_hint_y: None
-        height: dp(132)
-        text_size: self.width - dp(16), None
+        height: self.texture_size[1]
+        text_size: self.width - dp(20), None
         halign: "left"
         valign: "top"
         color: 0, 0, 0, 1
+        on_texture_size: root._update_height(self.texture_size[1])
 
 <TabRV>:
     viewclass: "DataCard"
     scroll_type: ['bars', 'content']
 
     RecycleBoxLayout:
-        default_size: None, dp(160)
+        default_size: None, dp(84)
         default_size_hint: 1, None
         size_hint_y: None
         height: self.minimum_height
         orientation: "vertical"
-        spacing: dp(6)
-        padding: dp(6)
+        spacing: dp(8)
+        padding: dp(8)
 '''
 Builder.load_string(KV)
 
@@ -1034,7 +1110,7 @@ class InfoTab(BaseTab):
         self.initial_visible = 4
         self.batch_size = 4
         self.max_visible = 12
-        self.control_panel.height = dp(52)
+        self.control_panel.height = dp(76)
         self.control_panel.clear_widgets()
         self.control_panel.add_widget(
             MDRaisedButton(
@@ -1054,14 +1130,11 @@ class InfoTab(BaseTab):
         is_open = bool(payload.get("isOpen", False)) if isinstance(payload, dict) else False
 
         rows = [
-            "[b]RYNEK USA[/b]\n"
-            "Pre-Market: 04:00-09:30 ET\n"
-            "Sesja Główna: 09:30-16:00 ET\n"
-            "Post-Market: 16:00-20:00 ET\n"
+            "[b]RYNEK USA[/b]\n\n"
             f"Status teraz: [color=#00AA00]{'OTWARTY' if is_open else 'ZAMKNIĘTY'}[/color]\n"
             f"Czas lokalny: {local_time_text()}\n"
             f"Następne otwarcie: {next_us_market_open_text()}",
-            US_MARKET_HOURS_TEXT,
+            us_market_hours_text_local(),
             build_full_glossary(),
             "[b]TABY[/b]\n"
             "• Info — status rynku i słowniczek.\n"
@@ -1083,12 +1156,12 @@ class ScannerTab(BaseTab):
         super().__init__(**kw)
         self.initial_visible = 12
         self.batch_size = 12
-        self.max_visible = 48
+        self.max_visible = 96
         self.static_tickers = ["AAPL", "MSFT", "NVDA", "AMD", "TSLA", "PLTR"]
-        self.control_panel.height = dp(118)
+        self.control_panel.height = dp(156)
         self.control_panel.clear_widgets()
 
-        input_row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(48), spacing=dp(8))
+        input_row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(52), spacing=dp(12))
         self.input_field = MDTextField(hint_text="Dodaj ticker", mode="rectangle")
         input_row.add_widget(self.input_field)
         input_row.add_widget(MDRaisedButton(text="+", size_hint_x=0.2, on_release=self.add_ticker))
@@ -1138,13 +1211,17 @@ class ScannerTab(BaseTab):
             session = d.get("session_state", get_pl_session_hint())
             pre_p = safe(d.get("pre_price", d.get("pre", 0.0)))
             post_p = safe(d.get("post_price", d.get("post", 0.0)))
+            prev_close = safe(d.get("prev_close", 0.0))
             tech = PriceEngine.analyze(sym, d.get("closes", []), price, vol, avg_vol)
+            change_p, change_p_pct = session_change_p(session, price, pre_p, post_p)
+
             rows.append(
                 f"[b]{sym}[/b] — [color=#555555]{comp_name}[/color]\n"
                 f"Sesja: {session}\n"
                 f"Cena sesyjna: [b]{price:.2f} USD[/b]\n"
+                f"Zmiana: [color={'#00AA00' if change >= 0 else '#FF0000'}]{change:+.2f} USD | {pct:+.2f}%[/color]\n"
+                f"Zmiana P: [color={'#00AA00' if change_p >= 0 else '#FF0000'}]{change_p:+.2f} USD | {change_p_pct:+.2f}%[/color]\n"
                 f"Pre-Market: {_fmt_session_price(pre_p)} | Post-Market: {_fmt_session_price(post_p)}\n"
-                f"[color={'#00AA00' if change >= 0 else '#FF0000'}]Zmiana: {change:+.2f} USD | {pct:+.2f}%[/color]\n"
                 f"Wolumen: {vol:,} (Śred. 10D: {avg_vol:,})\n"
                 f"Kapitalizacja: {format_cap(cap)} | P/E: [b]{pe}[/b]\n"
                 f"RSI: {color_wrap(fmt_num(tech['rsi'], 1), color_for_rsi(tech['rsi']))}\n"
@@ -1166,10 +1243,10 @@ class TickerTab(BaseTab):
         self.initial_visible = 1
         self.batch_size = 1
         self.max_visible = 1
-        self.control_panel.height = dp(50)
+        self.control_panel.height = dp(88)
         self.control_panel.clear_widgets()
 
-        row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8))
+        row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(52), spacing=dp(12))
         self.inp = MDTextField(hint_text="Ticker (np. TSLA)", mode="rectangle")
         row.add_widget(self.inp)
         row.add_widget(MDRaisedButton(text="Analizuj", on_release=self._on_search))
@@ -1228,14 +1305,17 @@ class TickerTab(BaseTab):
         pre_price = safe(d.get("pre_price", d.get("pre", 0.0)))
         post_price = safe(d.get("post_price", d.get("post", 0.0)))
 
+        change_p, change_p_pct = session_change_p(session_label, prev_close, pre_price, post_price)
+
         row = (
             f"[b]{d.get('name', sym)} ({sym})[/b] | Sesja: {session_label} | [color={signal_color}]{signal_text}[/color]\n"
-            f"Cena: [b]{price:.2f} USD[/b] | Pre: {_fmt_session_price(pre_price)} | Post: {_fmt_session_price(post_price)}\n"
-            f"Prev Close: {prev_close:.2f} | Zmiana: [color={'#00AA00' if change >= 0 else '#FF0000'}]{change:+.2f} USD | {pct:+.2f}%[/color]\n"
+            f"Cena sesyjna: [b]{price:.2f} USD[/b]\n"
+            f"Zmiana: [color={'#00AA00' if change >= 0 else '#FF0000'}]{change:+.2f} USD | {pct:+.2f}%[/color] | "
+            f"Zmiana P: [color={'#00AA00' if change_p >= 0 else '#FF0000'}]{change_p:+.2f} USD | {change_p_pct:+.2f}%[/color]\n"
+            f"Pre-Market: {_fmt_session_price(pre_price)} | Post-Market: {_fmt_session_price(post_price)}\n"
             f"Wolumen: [b]{vol:,}[/b] | Śr. 10D: [b]{avg_vol:,}[/b] | Dzień: {day_low:.2f}-{day_high:.2f} | 52W: {low52:.2f}-{high52:.2f}\n"
             f"Kapitalizacja: {format_cap(cap)} | P/E: {pe} | EPS: {eps}\n"
             f"Następny raport: {next_earnings}\n"
-            f"Poprzedni raport: {prev_earnings_period} | Surprise: {prev_earnings_surprise}\n"
             f"Reakcja po raporcie: {earnings_reaction}\n"
             f"RSI: [color={color_for_rsi(tech['rsi'])}]{tech['rsi']:.1f}[/color] | "
             f"MACD: [color={color_for_macd(tech['macd'], tech['sig'])}]{tech['macd']:.3f}[/color] | "
@@ -1257,9 +1337,9 @@ class KatalizatoryTab(BaseTab):
         self.initial_visible = 10
         self.batch_size = 10
         self.max_visible = 40
-        self.control_panel.height = dp(36)
+        self.control_panel.height = dp(76)
         self.control_panel.clear_widgets()
-        self.control_panel.add_widget(MDRaisedButton(text="Pobierz Dane", size_hint_y=None, height=dp(32), on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
+        self.control_panel.add_widget(MDRaisedButton(text="Pobierz Dane", size_hint_y=None, height=dp(34), on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
         self.control_panel.add_widget(self.more_button)
 
     def get_category_tag(self, title):
@@ -1310,18 +1390,33 @@ class KatalizatoryTab(BaseTab):
         threshold = int((now - timedelta(days=7)).timestamp())
 
         catalyst_queries = [
-            "FDA decision OR PDUFA decision OR adcom OR advisory committee OR CRL OR complete response letter OR approval OR clinical trial OR topline OR readout",
-            "merger OR acquisition OR takeover OR buyout OR strategic alternatives OR exploring sale OR sale process OR take private OR going private",
-            "government contract OR contract award OR large contract OR major contract OR deal OR partnership OR collaboration OR license",
-            "AI transformation OR artificial intelligence OR AI strategy OR generative AI OR automation",
+            "FDA",
+            "PDUFA",
+            "adcom",
+            "clinical trial",
+            "topline",
+            "readout",
+            "merger",
+            "acquisition",
+            "takeover",
+            "buyout",
+            "strategic alternatives",
+            "contract",
+            "award",
+            "partnership",
+            "artificial intelligence",
+            "AI",
+            "earnings",
+            "guidance",
         ]
 
         news_items = []
         seen = set()
 
         for q in catalyst_queries:
+            q_enc = quote_plus(q)
             res = await safe_request_async(
-                f"https://query2.finance.yahoo.com/v1/finance/search?q={q}&newsCount=24",
+                f"https://query2.finance.yahoo.com/v1/finance/search?q={q_enc}&newsCount=50",
                 timeout=6
             )
             if res.status_code != 200:
@@ -1393,11 +1488,12 @@ class KatalizatoryTab(BaseTab):
             display_name = names.get(ticker) or resolve_company_name_for_tab(app, ticker)
             label = f"{ticker} ({display_name})" if display_name and display_name.upper() != ticker.upper() else ticker
 
+            safe_link = link or search_url_from_query(title)
             card = (
-                f"[color=#FF33CC][b][{cat}][/b][/color] "
-                f"[color=#008080][b]{label}[/b][/color]\n"
+                f"[ref={safe_link}][color=#FF33CC][b][{cat}][/b][/color][/ref] "
+                f"[ref={safe_link}][color=#008080][b]{label}[/b][/color][/ref]\n"
                 f"{context}\n"
-                f"[ref={link}]{title}[/ref]"
+                f"[ref={safe_link}]{title}[/ref]"
             )
 
             if cat == "FDA/PDUFA":
@@ -1410,20 +1506,20 @@ class KatalizatoryTab(BaseTab):
                 other_cards.append(card)
 
         if fda_cards:
-            rows.append("[b][color=#ff9900]🩺 FDA / PDUFA / DECYZJE REGULACYJNE[/color][/b]")
+            rows.append(f"[ref={search_url_from_query('FDA PDUFA stocks news')}][b][color=#ff9900]🩺 FDA / PDUFA / DECYZJE REGULACYJNE[/color][/b][/ref]")
             rows.extend(fda_cards[:12])
         if mna_cards:
-            rows.append("[b][color=#FF6666]🧩 WYKUPY / PRZEJĘCIA / ZAINTERESOWANIE WYKUPEM[/color][/b]")
+            rows.append(f"[ref={search_url_from_query('merger acquisition buyout stocks news')}][b][color=#FF6666]🧩 WYKUPY / PRZEJĘCIA / ZAINTERESOWANIE WYKUPEM[/color][/b][/ref]")
             rows.extend(mna_cards[:12])
         if ai_cards:
-            rows.append("[b][color=#00FFFF]🧠 AI / TRANSFORMACJA / UMOWY[/color][/b]")
+            rows.append(f"[ref={search_url_from_query('artificial intelligence stock news')}][b][color=#00FFFF]🧠 AI / TRANSFORMACJA / UMOWY[/color][/b][/ref]")
             rows.extend(ai_cards[:12])
         if other_cards:
-            rows.append("[b][color=#FF33CC]🔥 INNE KATALIZATORY[/color][/b]")
+            rows.append(f"[ref={search_url_from_query('stock catalyst news earnings contract partnership')}][b][color=#FF33CC]🔥 INNE KATALIZATORY[/color][/b][/ref]")
             rows.extend(other_cards[:10])
 
         if earnings_rows:
-            rows.append("[b][color=#ff8c00]— KALENDARZ WYNIKÓW (7 DNI) —[/color][/b]")
+            rows.append(f"[ref={search_url_from_query('earnings calendar stocks')}][b][color=#ff8c00]— KALENDARZ WYNIKÓW (7 DNI) —[/color][/b][/ref]")
             for item in earnings_rows[:20]:
                 sym = item.get("symbol", "—")
                 name = names.get(sym) or resolve_company_name_for_tab(app, sym)
@@ -1449,9 +1545,9 @@ class CFDTab(BaseTab):
         self.initial_visible = 6
         self.batch_size = 6
         self.max_visible = 24
-        self.control_panel.height = dp(36)
+        self.control_panel.height = dp(76)
         self.control_panel.clear_widgets()
-        self.control_panel.add_widget(MDRaisedButton(text="Analizuj Rynek", size_hint_y=None, height=dp(30), on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
+        self.control_panel.add_widget(MDRaisedButton(text="Analizuj Rynek", size_hint_y=None, height=dp(34), on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
         self.control_panel.add_widget(self.more_button)
 
     def _cfd_universe(self):
@@ -1468,7 +1564,7 @@ class CFDTab(BaseTab):
 
         rows = []
         sections = {
-            "A: BREAKOUTY": [],
+            "A: BREAKOUTY / PRE-POST GAINERS": [],
             "B: TREND": [],
             "C: CFD": [],
         }
@@ -1483,9 +1579,16 @@ class CFDTab(BaseTab):
             avg_vol = int(safe(d.get("avg_vol", 0.0), 0.0))
             tech = PriceEngine.analyze(sym, closes, price, vol, avg_vol)
             tp, sl = make_tp_sl(price, 0.03, 0.02)
+            session_state = d.get("session_state", get_pl_session_hint())
+            pre_price = safe(d.get("pre_price", d.get("pre", 0.0)))
+            post_price = safe(d.get("post_price", d.get("post", 0.0)))
+            prev_close = safe(d.get("prev_close", 0.0))
+            change_p, change_p_pct = session_change_p(session_state, price, pre_price, post_price)
+
             row = (
                 f"[b]{name} ({sym})[/b]\n"
                 f"Cena: [b]{price:.2f}[/b] | TP: [color=#00AA00]{tp:.2f}[/color] | SL: [color=#FF3333]{sl:.2f}[/color]\n"
+                f"Zmiana P: [color={'#00AA00' if change_p >= 0 else '#FF0000'}]{change_p:+.2f} USD | {change_p_pct:+.2f}%[/color]\n"
                 f"RSI {tech['rsi']:.1f} | MACD {tech['macd']:.3f}/{tech['sig']:.3f} | Hist {tech['hist']:+.3f}\n"
                 f"SMA14 {fmt_num(tech['sma14'], 2)} | SMA30 {fmt_num(tech['sma30'], 2)} | SMA90 {fmt_num(tech['sma90'], 2)} | "
                 f"[color={tech['signal_color']}]{tech['signal_text']}[/color]"
@@ -1498,7 +1601,40 @@ class CFDTab(BaseTab):
                 sections["B: TREND"].append(row)
 
         rows.append(color_wrap(f"Ostatnia aktualizacja: {timestamp_text()}", "#888888"))
+
+        ranked = sorted(
+            [
+                (
+                    safe(d.get("pct", 0.0)),
+                    sym,
+                    normalize_company_name(sym, d.get("name", sym)),
+                    safe(d.get("session_price", d.get("price", 0.0))),
+                    safe(d.get("prev_close", 0.0)),
+                    safe(d.get("pre_price", d.get("pre", 0.0))),
+                    safe(d.get("post_price", d.get("post", 0.0))),
+                )
+                for sym, d in bulk_data.items()
+                if safe(d.get("price", 0.0)) > 0
+            ],
+            reverse=True
+        )
+
+        top_gainers = ranked[:5]
+        rows.append(f"[b][color=#008080]A: BREAKOUTY / PRE-POST GAINERS[/color][/b]")
+        if top_gainers:
+            for pct_v, sym, name, price_v, prev_v, pre_v, post_v in top_gainers:
+                rows.append(
+                    f"[b]{name} ({sym})[/b] | {price_v:.2f} USD | "
+                    f"Zmiana: [color={'#00AA00' if pct_v >= 0 else '#FF0000'}]{pct_v:+.2f}%[/color] | "
+                    f"Pre: {_fmt_session_price(pre_v)} | Post: {_fmt_session_price(post_v)}"
+                )
+        else:
+            rows.append("[color=#888888]Brak danych[/color]")
+
         for section, items in sections.items():
+            if section.startswith("A:"):
+                rows.extend(items[:10])
+                continue
             rows.append(f"[b][color=#008080]{section}[/color][/b]")
             rows.extend(items[:10] if items else ["[color=#888888]Brak danych[/color]"])
         return rows[:120]
@@ -1508,6 +1644,21 @@ class CFDTab(BaseTab):
 # =========================================
 
 class StockScanner(MDApp):
+    def handle_ref(self, ref):
+        ref = (ref or "").strip()
+        if not ref:
+            return
+        if ref.startswith("http://") or ref.startswith("https://"):
+            try:
+                webbrowser.open(ref)
+            except Exception:
+                pass
+            return
+        try:
+            webbrowser.open(search_url_from_query(ref))
+        except Exception:
+            pass
+
     def build(self):
         self.theme_cls.primary_palette = "Teal"
         self.theme_cls.theme_style = "Light"
