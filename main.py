@@ -863,9 +863,7 @@ async def fetch_ticker(symbol):
         if cal:
             next_earnings = cal[0].get("date", "Brak danych")
 
-    active_price = session_price if session_price > 0 else regular_price
-    if active_price <= 0:
-        active_price = prev_close
+    
 
    
     earnings_reaction = await fetch_prev_earnings_reaction(symbol)
