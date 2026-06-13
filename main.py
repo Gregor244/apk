@@ -564,7 +564,89 @@ async def fetch_company_names(symbols):
         sym, name = item
         out[sym] = name
     return out
+# ================================
+# MARKET DATA ENGINE v3 (CORE)
+# ================================
 
+def build_price_state(prev_close, pre_price=0.0, post_price=0.0, last_trade=0.0, regular_price=0.0):
+    return {
+        "prev_close": safe(prev_close),
+        "pre": safe(pre_price),
+        "post": safe(post_price),
+        "last": safe(last_trade),
+        "regular": safe(regular_price)
+    }
+
+
+def get_session_state(raw_state):
+    s = str(raw_state or "").upper().strip()
+    if s == "PRE":
+        return "PREMARKET"
+    if s == "POST":
+        return "POSTMARKET"
+    if s == "REGULAR":
+        return "OTWARTY"
+    return market_status()
+
+
+def select_active_price(session_state, ps):
+    pc = ps["prev_close"]
+    if pc <= 0:
+        return 0.0
+
+    if session_state == "PREMARKET":
+        return ps["pre"] or ps["last"] or pc
+
+    if session_state == "OTWARTY":
+        return ps["last"] or ps["regular"] or pc
+
+    if session_state == "POSTMARKET":
+        return ps["post"] or ps["last"] or pc
+
+    return pc
+
+
+def calc_change(ps, session_state):
+    pc = ps["prev_close"]
+    price = select_active_price(session_state, ps)
+
+    if pc <= 0 or price <= 0:
+        return 0.0, 0.0
+
+    diff = price - pc
+    pct = (diff / pc) * 100
+
+    return round(diff, 4), round(pct, 2)
+
+
+def compute_momentum(ind, pct, session_state):
+    score = 0
+
+    if ind["rsi"] < 30:
+        score += 2
+    elif ind["rsi"] > 70:
+        score -= 2
+    else:
+        score += 0.5 if ind["rsi"] > 50 else -0.5
+
+    score += 2 if ind["hist"] > 0 else -2
+    score += 1 if pct > 0 else -1
+
+    if session_state in ("PREMARKET", "POSTMARKET"):
+        score *= 0.8
+
+    return round(score, 2)
+
+
+def detect_regime(ind, pct):
+    if ind["rsi"] > 70 and ind["hist"] < 0:
+        return "DISTRIBUTION"
+    if ind["rsi"] < 30 and ind["hist"] > 0:
+        return "ACCUMULATION"
+    if abs(pct) < 0.3:
+        return "SIDEWAYS"
+    return "TREND"
+    
 async def fetch_ticker_name(symbol):
     symbol = (symbol or "").strip().upper()
     if not symbol:
@@ -785,10 +867,7 @@ async def fetch_ticker(symbol):
     if active_price <= 0:
         active_price = prev_close
 
-    change = active_price - prev_close if prev_close else 0.0
-    pct = (change / prev_close * 100) if prev_close else 0.0
-
-    m, s, h = macd(closes)
+   
     earnings_reaction = await fetch_prev_earnings_reaction(symbol)
 
     result = {
@@ -829,7 +908,17 @@ async def fetch_ticker(symbol):
     with REQUEST_CACHE_LOCK:
         REQUEST_CACHE[cache_key] = {"ts": now_ts, "data": dict(result)}
 
-    return result
+    snapshot = build_snapshot(symbol, {
+    "prev_close": prev_close,
+    "pre_price": pre_price,
+    "post_price": post_price,
+    "session_price": session_price,
+    "regular_price": regular_price,
+    "closes": closes,
+    "raw_state": raw_state
+})
+
+result.update(snapshot)
 
 async def fetch_bulk(symbols, chunk_size=4):
     unique = [s for s in dict.fromkeys([str(x).strip().upper() for x in symbols if x]) if s]
@@ -917,6 +1006,43 @@ class PriceEngine:
         if score <= -4: return score, "MOCNE SPRZEDAJ", "#FF0000"
         if score <= -1: return score, "SPRZEDAJ", "#FF9900"
         return score, "NEUTRALNE", "#888888"
+
+def build_snapshot(symbol, raw):
+    closes = raw.get("closes", [])
+
+    macd_v, signal_v, hist = macd(closes)
+
+    ind = {
+        "rsi": calc_rsi(closes),
+        "macd": macd_v,
+        "signal": signal_v,
+        "hist": hist
+    }
+
+    ps = build_price_state(
+        raw.get("prev_close"),
+        raw.get("pre_price"),
+        raw.get("post_price"),
+        raw.get("session_price"),
+        raw.get("regular_price")
+    )
+
+    session_state = get_session_state(raw.get("raw_state"))
+
+    price = select_active_price(session_state, ps)
+    diff, pct = calc_change(ps, session_state)
+
+    return {
+        "price": round(price, 4),
+        "change": diff,
+        "pct": pct,
+        "momentum": compute_momentum(ind, pct, session_state),
+        "regime": detect_regime(ind, pct),
+
+        # keep indicators for UI tabs
+        **ind
+    }
+
 
 # =========================================
 # RECYCLERVIEW
