@@ -12,7 +12,7 @@ icon.filename = %(source.dir)s/icon.png
 
 # ZAKTUALIZOWANE REQUIREMENTS:
 # Dodano httpx, certifi, anyio (dla obsługi asynchronicznych requestów w Python 3)
-requirements = python==3.11,kivy==2.3.0,kivymd==1.2.0,pillow,httpx,certifi,anyio,idna,sniffio,h11,h2,httpcore
+requirements = python3,kivy==2.3.0,kivymd==1.2.0,pillow,httpx,certifi,anyio,idna,sniffio,h11,h2,httpcore
 
 orientation = portrait
 fullscreen = 0
