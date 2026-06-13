@@ -484,38 +484,30 @@ def _fmt_session_price(v):
     v = safe(v, 0.0)
     return f"{v:.2f} USD" if v > 0 else "—"
 
-def session_change_(session_state, prev_close, pre_price=0.0, post_price=0.0, last_trade_price=0.0):
+def session_change_p(session_state, prev_close, pre_price=0.0, post_price=0.0):
     pc = safe(prev_close, 0.0)
     pre = safe(pre_price, 0.0)
     post = safe(post_price, 0.0)
-    last = safe(last_trade_price, 0.0)
 
     if pc <= 0:
         return 0.0, 0.0
 
-    # 1. wybór najlepszej dostępnej ceny w zależności od sesji
+    # wybór ceny
     if session_state == "PREMARKET":
-        price = pre or last or pc
-
-    elif session_state == "OTWARTY":
-        # TradingView-like: zawsze ostatni trade
-        price = last or pre or pc
-
+        price = pre
     elif session_state == "POSTMARKET":
-        price = post or last or pc
-
+        price = post
     else:
-        price = pc
+        return 0.0, 0.0  # brak sensu liczyć change dla regular bez dodatkowej ceny
 
-    # 2. fallback bezpieczeństwa
     if price <= 0:
         return 0.0, 0.0
 
-    # 3. real-time change vs prev close
     diff = price - pc
     pct = (diff / pc) * 100
 
     return round(diff, 4), round(pct, 2)
+
 # =========================================
 # FEEDS
 # =========================================
