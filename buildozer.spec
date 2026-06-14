@@ -24,8 +24,12 @@ android.accept_sdk_license = True
 android.enable_androidx = True
 
 # Foreground service + notifications + vibration + boot + battery exemption
-android.permissions = INTERNET,FOREGROUND_SERVICE,POST_NOTIFICATIONS,WAKE_LOCK,VIBRATE,RECEIVE_BOOT_COMPLETED,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,FOREGROUND_SERVICE_DATA_SYNC
+android.permissions = INTERNET,POST_NOTIFICATIONS,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,WAKE_LOCK,VIBRATE,RECEIVE_BOOT_COMPLETED,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 
+
+android.add_src = ./src/main/java
+
+p4a.extra_manifest_xml = ./android_manifest.xml
 # Foreground websocket service
 services = ScannerService:service.py
 
