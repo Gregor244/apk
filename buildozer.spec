@@ -8,7 +8,7 @@ source.dir = .
 source.include_exts = py,kv,png,jpg,json,txt,xml,java
 
 version = 10.0
-requirements = python3,kivy,kivymd,httpx,websockets,certifi,pyjnius,plyer,openssl,aiohttp
+requirements = python3,kivy,kivymd,httpx,websockets,certifi,pyjnius,plyer,openssl
 
 orientation = portrait
 fullscreen = 0
