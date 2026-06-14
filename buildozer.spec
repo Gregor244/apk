@@ -8,7 +8,7 @@ source.dir = .
 source.include_exts = py,kv,png,jpg,json,txt,xml,java
 
 version = 10.0
-requirements = python3==3.11.9,kivy==2.3.0,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer,openssl
+requirements = python3,kivy==2.3.0,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer,openssl
 
 orientation = portrait
 fullscreen = 0
@@ -41,8 +41,7 @@ android.gradle_dependencies = \
     com.google.firebase:firebase-analytics:22.1.0,\
     androidx.core:core:1.13.1
 
-p4a.branch=master
-osx.python_version = 3.11
+p4a.branch=stable
 
 android.wakelock = True
 log_level = 2
