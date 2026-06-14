@@ -31,7 +31,7 @@ android.google_services_json = google-services.json
 android.add_src = ./src/main/java
 android.meta_data = \
 
-com.google.firebase.messaging.default_notification_channel_id=sto ck_scanner_alerts
+com.google.firebase.messaging.default_notification_channel_id=stock_scanner_alerts
 p4a.extra_manifest_xml = ./android_manifest.xml
 # Foreground websocket service
 services = ScannerService:service.py
