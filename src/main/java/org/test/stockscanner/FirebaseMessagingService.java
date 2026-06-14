@@ -1,7 +1,4 @@
-// File:
-// src/main/java/org/test/stockscanner/FirebaseMessagingService.java
-
-package org.test.stockscanner;
+package org.gregor.stockscannerv10;
 
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -20,7 +17,7 @@ import org.kivy.android.PythonActivity;
 import java.util.Map;
 import java.util.Random;
 
-public class FirebaseMessagingService extends FirebaseMessagingService {
+public class MyFirebaseMessagingService extends FirebaseMessagingService {
 
     public static final String CHANNEL_ID = "stock_scanner_alerts";
 
@@ -34,13 +31,9 @@ public class FirebaseMessagingService extends FirebaseMessagingService {
     public void onNewToken(String token) {
         super.onNewToken(token);
 
-        android.util.Log.d(
-                "FCM",
-                "NEW TOKEN: " + token
-        );
+        android.util.Log.d("FCM", "NEW TOKEN: " + token);
 
-        // opcjonalnie:
-        // wyślij token do backendu websocket/API
+        // opcjonalnie: wyślij token do backendu websocket/API
     }
 
     @Override
@@ -54,7 +47,6 @@ public class FirebaseMessagingService extends FirebaseMessagingService {
             if (remoteMessage.getNotification().getTitle() != null) {
                 title = remoteMessage.getNotification().getTitle();
             }
-
             if (remoteMessage.getNotification().getBody() != null) {
                 body = remoteMessage.getNotification().getBody();
             }
@@ -62,40 +54,31 @@ public class FirebaseMessagingService extends FirebaseMessagingService {
 
         Map<String, String> data = remoteMessage.getData();
 
-        if (data.containsKey("title")) {
-            title = data.get("title");
-        }
-
-        if (data.containsKey("body")) {
-            body = data.get("body");
+        if (data != null) {
+            if (data.containsKey("title") && data.get("title") != null) {
+                title = data.get("title");
+            }
+            if (data.containsKey("body") && data.get("body") != null) {
+                body = data.get("body");
+            }
         }
 
         showNotification(title, body);
     }
 
     private void showNotification(String title, String body) {
-
         Intent intent = new Intent(this, PythonActivity.class);
-
-        intent.addFlags(
-                Intent.FLAG_ACTIVITY_CLEAR_TOP |
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-        );
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
         PendingIntent pendingIntent;
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-
             pendingIntent = PendingIntent.getActivity(
                     this,
                     0,
                     intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT |
-                    PendingIntent.FLAG_IMMUTABLE
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             );
-
         } else {
-
             pendingIntent = PendingIntent.getActivity(
                     this,
                     0,
@@ -106,51 +89,30 @@ public class FirebaseMessagingService extends FirebaseMessagingService {
 
         NotificationCompat.Builder builder =
                 new NotificationCompat.Builder(this, CHANNEL_ID)
-                        .setSmallIcon(
-                                getApplicationInfo().icon
-                        )
+                        .setSmallIcon(getApplicationInfo().icon)
                         .setContentTitle(title)
                         .setContentText(body)
-                        .setStyle(
-                                new NotificationCompat.BigTextStyle()
-                                        .bigText(body)
-                        )
-                        .setPriority(
-                                NotificationCompat.PRIORITY_HIGH
-                        )
+                        .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
                         .setAutoCancel(true)
                         .setContentIntent(pendingIntent)
-                        .setVisibility(
-                                NotificationCompat.VISIBILITY_PUBLIC
-                        );
+                        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
 
-        NotificationManagerCompat manager =
-                NotificationManagerCompat.from(this);
-
-        manager.notify(
-                new Random().nextInt(999999),
-                builder.build()
-        );
+        NotificationManagerCompat manager = NotificationManagerCompat.from(this);
+        manager.notify(new Random().nextInt(999999), builder.build());
     }
 
     private void createNotificationChannel() {
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-            NotificationChannel channel =
-                    new NotificationChannel(
-                            CHANNEL_ID,
-                            "Stock Scanner Alerts",
-                            NotificationManager.IMPORTANCE_HIGH
-                    );
-
-            channel.setDescription(
-                    "Powiadomienia Stock Scanner Pro"
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Stock Scanner Alerts",
+                    NotificationManager.IMPORTANCE_HIGH
             );
 
-            NotificationManager manager =
-                    getSystemService(NotificationManager.class);
+            channel.setDescription("Powiadomienia Stock Scanner Pro");
 
+            NotificationManager manager = getSystemService(NotificationManager.class);
             if (manager != null) {
                 manager.createNotificationChannel(channel);
             }
