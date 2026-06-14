@@ -21,7 +21,7 @@ Context = autoclass("android.content.Context")
 Build = autoclass("android.os.Build")
 ServiceInfo = autoclass("android.content.pm.ServiceInfo")
 
-CHANNEL_ID = "scanner_alerts"
+CHANNEL_ID = "stock_scanner_alerts"
 FOREGROUND_ID = 1001
 
 FINNHUB_KEY = "PUT_YOUR_FINNHUB_KEY_HERE"
