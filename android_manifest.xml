@@ -1,5 +1,39 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
+<!-- android_manifest.xml -->
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.test.stockscanner">
+
+    <!-- INTERNET -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- foreground -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <!-- Android 14 websocket/data sync -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- wake -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- restart po reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- vibration -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- opcjonalne -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <application
+        android:usesCleartextTraffic="true"
+        android:allowBackup="false">
+
+        <!-- ========================= -->
+        <!-- FIREBASE MESSAGING -->
+        <!-- ========================= -->
 
         <service
             android:name=".FirebaseMessagingService"
@@ -10,6 +44,44 @@
             </intent-filter>
 
         </service>
+
+        <!-- ========================= -->
+        <!-- PYTHON FOREGROUND SERVICE -->
+        <!-- ========================= -->
+
+        <service
+            android:name="org.kivy.android.PythonService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- ========================= -->
+        <!-- AUTOSTART AFTER REBOOT -->
+        <!-- ========================= -->
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+            </intent-filter>
+
+        </receiver>
+
+        <!-- ========================= -->
+        <!-- FCM DEFAULT CHANNEL -->
+        <!-- ========================= -->
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="stock_scanner_alerts" />
+
+        <!-- optional -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="true" />
 
     </application>
 </manifest>
