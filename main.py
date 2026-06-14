@@ -1332,6 +1332,14 @@ class StockScanner(MDApp):
         return screen
 
     def on_start(self):
+        from android import AndroidService
+
+service = AndroidService(
+    "Stock Scanner",
+    "Websocket active"
+)
+
+service.start("START")
         ASYNC_LOOP_READY.wait(timeout=5)
         self.start_foreground_service()
         self.request_battery_optimization_exception()
