@@ -28,7 +28,9 @@ android.permissions = INTERNET,POST_NOTIFICATIONS,FOREGROUND_SERVICE,FOREGROUND_
 
 
 android.add_src = ./src/main/java
+android.meta_data = \
 
+com.google.firebase.messaging.default_notification_channel_id=sto ck_scanner_alerts
 p4a.extra_manifest_xml = ./android_manifest.xml
 # Foreground websocket service
 services = ScannerService:service.py
