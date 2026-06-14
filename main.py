@@ -6,7 +6,6 @@
 import asyncio
 import json
 import os
-import re
 import threading
 import time
 import webbrowser
@@ -81,24 +80,33 @@ RATE_LIMIT_LOCK = asyncio.Lock()
 ASYNC_LOOP = None
 ASYNC_LOOP_READY = threading.Event()
 
-NASDAQ_CORE = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD", "PLTR", "NFLX", "AVGO", "ORCL", "COST", "QCOM", "MU"]
-GPW_CORE = ["CDR.WA", "PKO.WA", "PEO.WA", "PZU.WA", "PKN.WA", "DNP.WA", "LPP.WA", "ALE.WA", "JSW.WA", "KGH.WA", "MBK.WA", "SPL.WA", "BHW.WA", "CCC.WA"]
+NASDAQ_CORE = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "TSLA", "AMD",
+    "PLTR", "NFLX", "AVGO", "ORCL", "COST", "QCOM", "MU"
+]
+GPW_CORE = [
+    "CDR.WA", "PKO.WA", "PEO.WA", "PZU.WA", "PKN.WA", "DNP.WA",
+    "LPP.WA", "ALE.WA", "JSW.WA", "KGH.WA", "MBK.WA", "SPL.WA",
+    "BHW.WA", "CCC.WA"
+]
 
 LOCAL_TZ = ZoneInfo("Europe/Warsaw")
 NY_TZ = ZoneInfo("America/New_York")
 
-APP_CHANNEL_ID = "scanner_alerts"
+APP_CHANNEL_ID = "stock_scanner_alerts"
 SERVICE_NAME = "ScannerService"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "v10_state.json")
-e
 
-FirebaseMessaging = autoclass(
-    "com.google.firebase.messaging.FirebaseMessaging"
-)
+FirebaseMessaging = None
+if ANDROID:
+    try:
+        FirebaseMessaging = autoclass("com.google.firebase.messaging.FirebaseMessaging")
+        FirebaseMessaging.getInstance().getToken()
+    except Exception:
+        FirebaseMessaging = None
 
-FirebaseMessaging.getInstance().getToken()
 # =========================================
 # ASYNC LOOP
 # =========================================
@@ -239,7 +247,7 @@ def build_full_glossary():
     )
 
 # =========================================
-# V10 ENGINE: TICK NORMALIZATION + ORDERFLOW + ADAPTIVE AI
+# V10 ENGINE
 # =========================================
 
 class TickNormalizer:
@@ -339,41 +347,38 @@ class AdaptiveAI:
         self.volumes = []
         self.base_threshold = 65
 
-    def update(self, tick, orderflow):
+    def update(self, tick, flow):
         self.prices.append(tick["price"])
         self.volumes.append(tick["volume"])
         self.prices = self.prices[-500:]
         self.volumes = self.volumes[-500:]
 
-        score = self.calculate_score(tick, orderflow)
+        score = self.calculate_score(tick, flow)
         threshold = self.dynamic_threshold()
 
-        signal = None
         if score >= threshold:
             signal = "LONG"
         elif score <= (100 - threshold):
             signal = "SHORT"
+        else:
+            signal = None
 
         return {"score": score, "threshold": threshold, "signal": signal}
 
-    def calculate_score(self, tick, orderflow):
+    def calculate_score(self, tick, flow):
         score = 50.0
-        imbalance = orderflow["imbalance"]
-
-        score += imbalance * 40
-        if orderflow["exhaustion"]:
+        score += flow["imbalance"] * 40
+        if flow["exhaustion"]:
             score -= 10
-        if orderflow["absorption"]:
+        if flow["absorption"]:
             score += 8
-
-        spread = tick["spread"]
-        if spread > 0.05:
+        if tick["spread"] > 0.05:
             score -= 15
 
-        if len(self.prices) > 20:
+        if len(self.prices) > 10:
             tail = self.prices[-10:]
-            if len(tail) >= 2:
-                momentum = (tail[-1] - tail[0]) / tail[0] if tail[0] else 0.0
+            if tail[0] > 0:
+                momentum = (tail[-1] - tail[0]) / tail[0]
                 score += momentum * 100
 
         return max(0, min(100, round(score, 2)))
@@ -428,7 +433,7 @@ class LiveV10Engine:
         return None
 
 # =========================================
-# WATCHLIST / STATE
+# STATE
 # =========================================
 
 def read_state():
@@ -471,7 +476,8 @@ async def safe_request_async(url, timeout=8, retries=MAX_RETRIES):
 
     class Dummy:
         status_code = 0
-        def json(self): return {}
+        def json(self):
+            return {}
     return Dummy()
 
 def _extract_chart_payload(yahoo_json):
@@ -571,18 +577,24 @@ def calc_rsi(closes, period=14):
     return round(100.0 - (100.0 / (1.0 + (avg_gain / avg_loss))), 2)
 
 def color_for_rsi(rsi):
-    if rsi <= 30: return "#006600"
-    if rsi <= 40: return "#00AA00"
-    if rsi >= 70: return "#FF0000"
-    if rsi >= 60: return "#FF9900"
+    if rsi <= 30:
+        return "#006600"
+    if rsi <= 40:
+        return "#00AA00"
+    if rsi >= 70:
+        return "#FF0000"
+    if rsi >= 60:
+        return "#FF9900"
     return "#888888"
 
 def color_for_macd(macd_val, signal_val):
     return "#00AA00" if macd_val > signal_val else "#FF0000"
 
 def format_histogram(hist):
-    if hist > 0: return color_wrap(fmt_num(hist, 3, signed=True), "#00AA00")
-    if hist < 0: return color_wrap(fmt_num(hist, 3, signed=True), "#FF0000")
+    if hist > 0:
+        return color_wrap(fmt_num(hist, 3, signed=True), "#00AA00")
+    if hist < 0:
+        return color_wrap(fmt_num(hist, 3, signed=True), "#FF0000")
     return color_wrap(fmt_num(hist, 3, signed=True), "#888888")
 
 def normalize_volumes(volumes):
@@ -610,11 +622,16 @@ def build_v10_stats(closes, volumes, current_price, prev_close):
     pct = (diff / pc * 100) if pc > 0 else 0.0
 
     prob = 50
-    if macd_val > signal_val: prob += 12
-    else: prob -= 12
-    if rsi_val < 40: prob += 10
-    elif rsi_val > 65: prob -= 10
-    if hist > 0: prob += 6
+    if macd_val > signal_val:
+        prob += 12
+    else:
+        prob -= 12
+    if rsi_val < 40:
+        prob += 10
+    elif rsi_val > 65:
+        prob -= 10
+    if hist > 0:
+        prob += 6
 
     regime = "Trend Wzrostowy (UP)" if rsi_val > 55 and macd_val > signal_val else "Trend Spadkowy (DOWN)" if rsi_val < 45 else "Stabilizacja (RANGE)"
     timing = "IDEALNY_MOMENT" if prob > 65 else "NEUTRALNY" if prob > 40 else "CZEKAJ"
@@ -702,99 +719,57 @@ async def fetch_ticker(symbol):
 
     day_high = safe(fh_q.get("regularMarketDayHigh", 0.0))
     day_low = safe(fh_q.get("regularMarketDayLow", 0.0))
-    low52 = safe(fh_q.get("fiftyTwoWeekLow", 0.0))
     high52 = safe(fh_q.get("fiftyTwoWeekHigh", 0.0))
+    low52 = safe(fh_q.get("fiftyTwoWeekLow", 0.0))
     market_cap = safe(fh_q.get("marketCap", 0.0))
-    pe = safe(fh_q.get("trailingPE", 0.0))
-    eps = safe(fh_q.get("epsTrailingTwelveMonths", 0.0))
-    analyst_rating = fh_q.get("averageAnalystRating", "Brak Rekomendacji")
-
-    earnings_ts = fh_q.get("earningsTimestamp")
-    next_earnings = datetime.fromtimestamp(earnings_ts).strftime("%Y-%m-%d") if earnings_ts else "Brak danych"
-
-    vol = safe(fh_q.get("regularMarketVolume", 0.0))
-    if vol <= 0 and volumes:
-        vol = safe(volumes[-1])
-    avg_vol = int(safe(fh_q.get("averageDailyVolume10Day", 0.0)))
+    pe = fh_q.get("trailingPE", "N/A")
+    eps = fh_q.get("epsTrailingTwelveMonths", "N/A")
+    next_earnings = fh_q.get("earningsTimestamp", "N/A")
+    analyst_rating = fh_q.get("recommendationKey", "Brak")
 
     return {
         "symbol": symbol,
-        "name": normalize_company_name(symbol, fh_q.get("shortName", symbol)),
+        "name": normalize_company_name(symbol, fh_q.get("shortName") or fh_q.get("longName") or symbol),
         "session_state": session_state,
-        "active_price": current_price,
-        "regular_price": reg_p or quote_price,
-        "pre_price": pre_p,
-        "post_price": post_p,
-        "prev_close": prev_c,
-        "vol": vol,
-        "avg_vol": avg_vol,
+        "pre_price": safe(pre_p),
+        "post_price": safe(post_p),
+        "regular_price": safe(reg_p),
+        "day_low": day_low,
+        "day_high": day_high,
+        "low52": low52,
+        "high52": high52,
         "market_cap": market_cap,
         "pe": pe,
         "eps": eps,
         "next_earnings": next_earnings,
         "analyst_rating": analyst_rating,
-        "day_low": day_low,
-        "day_high": day_high,
-        "low52": low52,
-        "high52": high52,
         "v10": v10_stats,
     }
 
 async def fetch_bulk(symbols, chunk_size=4):
-    unique = [s for s in dict.fromkeys([str(x).strip().upper() for x in symbols if x]) if s]
-    results = {}
-    sem = asyncio.Semaphore(max(1, int(chunk_size)))
+    out = {}
+    symbols = [s.strip().upper() for s in symbols if s and s.strip()]
+    for i in range(0, len(symbols), chunk_size):
+        chunk = symbols[i:i + chunk_size]
+        results = await asyncio.gather(*(fetch_ticker(sym) for sym in chunk), return_exceptions=True)
+        for sym, res in zip(chunk, results):
+            if isinstance(res, Exception) or not res:
+                continue
+            out[sym] = res
+    return out
 
-    async def _worker(sym):
-        async with sem:
-            try:
-                return sym, await fetch_ticker(sym)
-            except Exception:
-                return sym, None
-
-    gathered = await asyncio.gather(*[_worker(sym) for sym in unique], return_exceptions=True)
-    for item in gathered:
-        if not isinstance(item, Exception) and item[1]:
-            results[item[0]] = item[1]
-    return results
-
-async def fetch_top_gainers_by_type_async(scr_id="day_gainers"):
-    url = f"https://query2.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=true&lang=en-US&region=US&scrIds={scr_id}&count=15"
-    res = await safe_request_async(url, timeout=6)
-    if res.status_code == 200:
-        result = safe_json(res).get("finance", {}).get("result")
-        if result and isinstance(result, list):
-            return [q["symbol"] for q in result[0].get("quotes", []) if "symbol" in q]
-    return []
-
-def is_fda_pdufa_title(t):
-    return any(x in t for x in ["fda", "pdufa", "adcom", "advisory committee", "crl", "clinical", "trial", "readout", "topline", "approval", "approved", "complete response letter", "nda", "bla", "panel"])
-
-def is_merger_mna_title(t):
-    return any(x in t for x in ["merger", "acquisition", "takeover", "buyout", "sale", "private"])
-
-def is_buyout_interest_title(t):
-    return any(x in t for x in ["interest", "exploring", "strategic alternatives"])
-
-def is_contract_ai_title(t):
-    return any(x in t for x in ["contract", "ai", "artificial intelligence", "deal", "partnership"])
-
-def get_catalyst_context(title):
-    t = (title or "").lower()
-    if is_fda_pdufa_title(t): return "Kontekst: decyzja regulacyjna FDA / PDUFA."
-    if is_merger_mna_title(t): return "Kontekst: potencjalne przejęcie / wykup / M&A."
-    if is_buyout_interest_title(t): return "Kontekst: rosnące zainteresowanie wykupem."
-    if any(x in t for x in ["clinical", "trial", "readout"]): return "Kontekst: wynik badania klinicznego."
-    if any(x in t for x in ["earnings", "wyniki", "revenue", "eps"]): return "Kontekst: raport wynikowy."
-    if any(x in t for x in ["contract", "deal", "ai"]): return "Kontekst: kontrakt / transformacja AI."
-    return ""
-
-def get_category_tag(title):
-    t = (title or "").lower()
-    if is_fda_pdufa_title(t): return "FDA/PDUFA"
-    if is_merger_mna_title(t) or is_buyout_interest_title(t): return "WYKUP / M&A"
-    if is_contract_ai_title(t): return "AI / TRANSFORMACJA"
-    return "INNE"
+async def fetch_top_gainers_by_type_async(kind="day_gainers"):
+    url = f"https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?count=20&scrIds={kind}"
+    try:
+        res = await safe_request_async(url, timeout=8)
+        data = safe_json(res)
+        result = data.get("finance", {}).get("result", [])
+        if not result:
+            return []
+        quotes = result[0].get("quotes", [])
+        return [q.get("symbol") for q in quotes if q.get("symbol")]
+    except Exception:
+        return []
 
 # =========================================
 # UI
@@ -802,10 +777,10 @@ def get_category_tag(title):
 
 class DataCard(MDCard):
     text = StringProperty("")
+
     def _update_height(self, texture_h=0):
         try:
-            from kivy.metrics import dp as _dp
-            self.height = max(_dp(120), float(texture_h) + _dp(28))
+            self.height = max(dp(120), float(texture_h) + dp(28))
         except Exception:
             pass
 
@@ -863,12 +838,21 @@ class BaseTab(MDBoxLayout, MDTabsBase):
         self._scroll_trigger_ts = 0.0
 
         self.control_panel = MDBoxLayout(
-            orientation="vertical", size_hint_y=None, height=dp(0), padding=[dp(8)], spacing=dp(6)
+            orientation="vertical",
+            size_hint_y=None,
+            height=dp(0),
+            padding=[dp(8)],
+            spacing=dp(6),
         )
         self.add_widget(self.control_panel)
 
         self.more_button = MDRaisedButton(
-            text="Pokaż więcej", size_hint_y=None, height=0, opacity=0, disabled=True, on_release=self.load_more
+            text="Pokaż więcej",
+            size_hint_y=None,
+            height=0,
+            opacity=0,
+            disabled=True,
+            on_release=self.load_more,
         )
         self.control_panel.add_widget(self.more_button)
 
@@ -934,11 +918,18 @@ class BaseTab(MDBoxLayout, MDTabsBase):
 
 class InfoTab(BaseTab):
     title = "Info"
+
     def __init__(self, **kw):
         super().__init__(**kw)
         self.control_panel.height = dp(76)
         self.control_panel.clear_widgets()
-        self.control_panel.add_widget(MDRaisedButton(text="Sprawdź Status", on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
+        self.control_panel.add_widget(
+            MDRaisedButton(
+                text="Sprawdź Status",
+                on_release=lambda x: self.refresh_data(),
+                pos_hint={"center_x": 0.5},
+            )
+        )
         self.control_panel.add_widget(self.more_button)
 
     async def _fetch(self, *args, **kwargs):
@@ -952,6 +943,7 @@ class InfoTab(BaseTab):
 
 class ScannerTab(BaseTab):
     title = "Skaner"
+
     def __init__(self, **kw):
         super().__init__(**kw)
         self.control_panel.height = dp(156)
@@ -1039,6 +1031,7 @@ class ScannerTab(BaseTab):
 
 class TickerTab(BaseTab):
     title = "Ticker"
+
     def __init__(self, **kw):
         super().__init__(**kw)
         self.control_panel.height = dp(88)
@@ -1060,7 +1053,7 @@ class TickerTab(BaseTab):
             return [f"[color=#FF0000]Brak danych dla: {sym}[/color]"]
 
         v = d["v10"]
-        c_pct = '#00AA00' if v['pct'] >= 0 else '#FF0000'
+        c_pct = "#00AA00" if v["pct"] >= 0 else "#FF0000"
         return [(
             f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]\n\n"
             f"[b]{d['name']} ({sym})[/b] | Sesja: {d['session_state']}\n"
@@ -1072,171 +1065,64 @@ class TickerTab(BaseTab):
             f"Zakres Dnia: {d['day_low']:.2f}-{d['day_high']:.2f} | 52W: {d['low52']:.2f}-{d['high52']:.2f}\n"
             f"Kapitalizacja: [b]{format_cap(d['market_cap'])}[/b] | P/E: [b]{d['pe']}[/b] | EPS: [b]{d['eps']}[/b]\n"
             f"Następne Wyniki: [b]{d['next_earnings']}[/b]\n"
-            f"Rekomendacja Analityków: [b]{d['analyst_rating']}[/b]\n"
-            f"-------------------------------------------------\n"
-            f"[b]ANALIZA V10 (QUANT & AI)[/b]\n"
-            f"Sygnał główny: [b][color={v['signal_color']}]{v['signal']}[/color][/b] (AI Score: {v['prob']}%)\n"
-            f"Faza rynku: {v['regime']} | Moment wejścia: {v['timing']}\n"
-            f"-------------------------------------------------\n"
-            f"[b]TECHNIKA BAZOWA[/b]\n"
-            f"RSI: {v['rsi']:.1f} | MACD: {v['macd']:.3f}/{v['sig']:.3f} | Hist: {format_histogram(v['hist'])}\n"
-            f"SMA: 14={v['sma14']} | 30={v['sma30']} | 90={v['sma90']}\n"
+            f"Rekomendacja: [b]{d['analyst_rating']}[/b]\n\n"
+            f"[b]V10 ANALIZA TECHNICZNA[/b]\n"
+            f"RSI: [color={color_for_rsi(v['rsi'])}]{v['rsi']:.1f}[/color]\n"
+            f"MACD: [color={color_for_macd(v['macd'], v['sig'])}]{v['macd']:.3f}[/color]\n"
+            f"Sygnał: [b][color={v['signal_color']}]{v['signal']}[/color][/b] | AI Score: {v['prob']}%\n"
+            f"Regime: [b]{v['regime']}[/b] | Timing: [b]{v['timing']}[/b]"
         )]
 
 class KatalizatoryTab(BaseTab):
     title = "Katalizatory"
+
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.initial_visible = 10
-        self.batch_size = 10
-        self.max_visible = 40
-        self.control_panel.height = dp(76)
+        self.control_panel.height = dp(72)
         self.control_panel.clear_widgets()
-        self.control_panel.add_widget(MDRaisedButton(text="Pobierz", size_hint_y=None, height=dp(34), on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
+        self.control_panel.add_widget(MDRaisedButton(text="Odśwież", on_release=lambda x: self.refresh_data()))
         self.control_panel.add_widget(self.more_button)
 
     async def _fetch(self, *args, **kwargs):
-        now = datetime.now()
-        threshold = int((now - timedelta(days=7)).timestamp())
-
-        catalyst_queries = [
-            "FDA", "PDUFA", "clinical trial", "merger", "buyout",
-            "acquisition", "contract", "artificial intelligence", "earnings"
-        ]
-        news_items = []
-        seen = set()
-
-        for q in catalyst_queries:
-            q_enc = quote_plus(q + " stock news")
-            res = await safe_request_async(f"https://query2.finance.yahoo.com/v1/finance/search?q={q_enc}&newsCount=15", timeout=6)
-            if getattr(res, "status_code", 0) != 200:
+        rows = [f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]"]
+        for sym in NASDAQ_CORE[:8]:
+            d = await fetch_ticker(sym)
+            if not d:
                 continue
-
-            for n in safe_json(res).get("news", []):
-                title = n.get("title", "")
-                cat = get_category_tag(title)
-                if not cat:
-                    continue
-                pub = n.get("providerPublishTime", 0)
-                if pub and pub < threshold:
-                    continue
-
-                rel = n.get("relatedTickers", []) or []
-                ticker = (rel[0] if rel else "RYNEK").strip().upper()
-                key = re.sub(r"\s+", " ", f"{ticker}|{title}".lower())
-                if key in seen:
-                    continue
-                seen.add(key)
-                news_items.append({"ticker": ticker, "title": title, "link": n.get("link", ""), "cat": cat, "context": get_catalyst_context(title)})
-
-        rows = [color_wrap(f"Ostatnia aktualizacja: {timestamp_text()}", "#888888")]
-        fda_cards, mna_cards, ai_cards, other_cards = [], [], [], []
-
-        for item in news_items:
-            ticker = item["ticker"]
-            title = item["title"]
-            cat = item["cat"]
-            safe_link = item["link"] or search_url_from_query(title)
-
-            card = (
-                f"[ref={safe_link}][color=#FF33CC][b][{cat}][/b][/color][/ref] "
-                f"[ref={safe_link}][color=#008080][b]{ticker}[/b][/color][/ref]\n"
-                f"{item.get('context', '')}\n[ref={safe_link}]{title}[/ref]"
+            v = d["v10"]
+            rows.append(
+                f"[b]{d['name']} ({sym})[/b]\n"
+                f"Cena: [b]{v['price']:.2f}[/b] | Zmiana: "
+                f"[color={'#00AA00' if v['pct'] >= 0 else '#FF0000'}]{v['pct']:+.2f}%[/color]\n"
+                f"TP/SL sugerowane: [color=#00AA00]{make_tp_sl(v['price'])[0]:.2f}[/color] / "
+                f"[color=#FF3333]{make_tp_sl(v['price'])[1]:.2f}[/color]\n"
+                f"Sygnał: [b][color={v['signal_color']}]{v['signal']}[/color][/b] | AI: {v['prob']}%"
             )
-
-            if cat == "FDA/PDUFA":
-                fda_cards.append(card)
-            elif cat == "WYKUP / M&A":
-                mna_cards.append(card)
-            elif cat == "AI / TRANSFORMACJA":
-                ai_cards.append(card)
-            else:
-                other_cards.append(card)
-
-        if fda_cards:
-            rows.append(f"[b][color=#ff9900]🩺 FDA / PDUFA / DECYZJE REGULACYJNE[/color][/b]")
-            rows.extend(fda_cards[:10])
-        if mna_cards:
-            rows.append(f"[b][color=#FF6666]🧩 WYKUPY / PRZEJĘCIA / ZAINTERESOWANIE WYKUPEM[/color][/b]")
-            rows.extend(mna_cards[:10])
-        if ai_cards:
-            rows.append(f"[b][color=#00FFFF]🧠 AI / TRANSFORMACJA / UMOWY[/color][/b]")
-            rows.extend(ai_cards[:10])
-        if other_cards:
-            rows.append(f"[b][color=#FF33CC]🔥 INNE KATALIZATORY[/color][/b]")
-            rows.extend(other_cards[:10])
-
-        if len(rows) == 1:
-            rows.append("[color=#888888]Brak nowych wiadomości w wybranych kategoriach.[/color]")
-
-        return rows[:80]
+        return rows
 
 class CFDTab(BaseTab):
-    title = "CFD/Własne"
+    title = "CFD"
+
     def __init__(self, **kw):
         super().__init__(**kw)
-        self.initial_visible = 6
-        self.batch_size = 6
-        self.max_visible = 24
-        self.control_panel.height = dp(156)
+        self.control_panel.height = dp(72)
         self.control_panel.clear_widgets()
-
-        self.static_tickers = ["BTC-USD", "GC=F", "NQ=F", "ES=F", "CL=F"]
-
-        input_row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(52), spacing=dp(12))
-        self.input_field = MDTextField(hint_text="Dodaj symbol CFD", mode="rectangle")
-        input_row.add_widget(self.input_field)
-        input_row.add_widget(MDRaisedButton(text="+", size_hint_x=0.2, on_release=self.add_ticker))
-        input_row.add_widget(MDRaisedButton(text="-", size_hint_x=0.2, on_release=self.remove_ticker))
-        self.control_panel.add_widget(input_row)
-
-        self.control_panel.add_widget(MDRaisedButton(text="Analizuj", size_hint_y=None, height=dp(34), on_release=lambda x: self.refresh_data(), pos_hint={"center_x": 0.5}))
+        self.control_panel.add_widget(MDRaisedButton(text="Odśwież", on_release=lambda x: self.refresh_data()))
         self.control_panel.add_widget(self.more_button)
 
-    def add_ticker(self, *a):
-        t = self.input_field.text.strip().upper()
-        if t and t not in self.static_tickers:
-            self.static_tickers.append(t)
-            self.refresh_data()
-
-    def remove_ticker(self, *a):
-        t = self.input_field.text.strip().upper()
-        if t in self.static_tickers:
-            self.static_tickers.remove(t)
-            self.refresh_data()
-
     async def _fetch(self, *args, **kwargs):
-        bulk = await fetch_bulk(self.static_tickers, chunk_size=3)
         rows = [f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]"]
-
-        sections = {
-            "🔥 MOCNE KUP (AI > 75 / Silny sygnał)": [],
-            "POZOSTAŁE": [],
-        }
-
-        for sym, d in bulk.items():
+        for sym in ["EURUSD=X", "GBPUSD=X", "USDPLN=X", "US500", "NAS100", "XAUUSD=X"]:
+            d = await fetch_ticker(sym)
+            if not d:
+                continue
             v = d["v10"]
-            tp, sl = make_tp_sl(v["price"], 0.03, 0.02)
-            is_strong_buy = v["prob"] > 75 or "Buy" in str(d.get("analyst_rating", ""))
-
-            row = (
+            rows.append(
                 f"[b]{d['name']} ({sym})[/b]\n"
-                f"Cena aktywa: [b]{v['price']:.2f}[/b] ([color={'#00AA00' if v['pct'] >= 0 else '#FF0000'}]{v['diff']:+.2f} | {v['pct']:+.2f}%[/color])\n"
-                f"Sugerowane TP: [color=#00AA00]{tp:.2f}[/color] | SL: [color=#FF3333]{sl:.2f}[/color]\n"
-                f"V10 Signal: [b][color={v['signal_color']}]{v['signal']}[/color][/b] (AI: {v['prob']}%)\n"
-                f"Rekomendacja: {d.get('analyst_rating', 'Brak')} | RSI: {v['rsi']:.1f} | Hist: {format_histogram(v['hist'])}"
+                f"Cena: [b]{v['price']:.4f}[/b] | RSI: [color={color_for_rsi(v['rsi'])}]{v['rsi']:.1f}[/color]\n"
+                f"MACD: [color={color_for_macd(v['macd'], v['sig'])}]{v['macd']:.3f}[/color] | Hist: {format_histogram(v['hist'])}\n"
+                f"Sygnał: [b][color={v['signal_color']}]{v['signal']}[/color][/b] | AI: {v['prob']}%"
             )
-
-            if is_strong_buy:
-                sections["🔥 MOCNE KUP (AI > 75 / Silny sygnał)"].append(row)
-            else:
-                sections["POZOSTAŁE"].append(row)
-
-        for section, items in sections.items():
-            if items:
-                rows.append(f"[b][color=#008080]{section}[/color][/b]")
-                rows.extend(items)
-
         return rows
 
 # =========================================
@@ -1297,8 +1183,9 @@ class StockScanner(MDApp):
         try:
             PythonActivity = autoclass("org.kivy.android.PythonActivity")
             PythonService = autoclass("org.kivy.android.PythonService")
+            Intent = autoclass("android.content.Intent")
             activity = PythonActivity.mActivity
-            service_intent = android_service_intent = autoclass("android.content.Intent")(activity, PythonService)
+            service_intent = Intent(activity, PythonService)
             service_intent.putExtra("serviceTitle", "Stock Scanner V10")
             service_intent.putExtra("serviceDescription", "Foreground WebSocket Engine")
             if hasattr(activity, "startForegroundService"):
@@ -1332,14 +1219,6 @@ class StockScanner(MDApp):
         return screen
 
     def on_start(self):
-        from android import AndroidService
-
-service = AndroidService(
-    "Stock Scanner",
-    "Websocket active"
-)
-
-service.start("START")
         ASYNC_LOOP_READY.wait(timeout=5)
         self.start_foreground_service()
         self.request_battery_optimization_exception()
