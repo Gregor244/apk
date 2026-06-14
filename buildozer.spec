@@ -8,8 +8,7 @@ source.dir = .
 source.include_exts = py,kv,png,jpg,json,txt,xml,java
 
 version = 10.0
-
-requirements = python3,kivy,kivymd,httpx,websockets,certifi,pyjnius,plyer,openssl
+requirements = python3,kivy,kivymd,httpx,websockets,certifi,pyjnius,plyer,openssl,aiohttp
 
 orientation = portrait
 fullscreen = 0
@@ -19,6 +18,7 @@ android.api = 34
 android.minapi = 26
 android.sdk = 34
 android.ndk = 25b
+android.ard_src = src/main/java
 
 android.accept_sdk_license = True
 android.enable_androidx = True
@@ -32,6 +32,7 @@ android.add_src = ./src/main/java
 android.meta_data = com.google.firebase.messaging.default_notification_channel_id=stock_scanner_alerts
 p4a.extra_manifest_xml = ./android_manifest.xml
 
+android.add_aars = 
 # Foreground websocket service
 services = ScannerService:service.py
 
