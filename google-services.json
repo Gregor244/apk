@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:976715660695:android:7fbb530fd4d74974e958d2",
         "android_client_info": {
-          "package_name": "org.test.stockscanner"
+          "package_name": "org.gregor.stockscanner"
         }
       },
       "oauth_client": [],
