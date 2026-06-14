@@ -52,7 +52,7 @@ except Exception:
 # =========================================
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
-FINNHUB_KEY = "PUT_YOUR_FINNHUB_KEY_HERE"
+FINNHUB_KEY = "d82t3s1r01ql4onfbbngd82t3s1r01ql4onfbbo0"
 
 HTTP_CLIENT = httpx.AsyncClient(
     headers=HEADERS,
