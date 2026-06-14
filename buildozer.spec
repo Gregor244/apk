@@ -26,6 +26,7 @@ android.enable_androidx = True
 # Foreground service + notifications + vibration + boot + battery exemption
 android.permissions = INTERNET,POST_NOTIFICATIONS,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,WAKE_LOCK,VIBRATE,RECEIVE_BOOT_COMPLETED,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 
+android.google_services_json = google-services.json
 
 android.add_src = ./src/main/java
 android.meta_data = \
