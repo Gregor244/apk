@@ -48,5 +48,9 @@ android.wakelock = True
 log_level = 2
 warn_on_root = 0
 
+rm -rf .buildozer
+rm -rf bin
+rm -rf ~/.local/share/python-for-android
+
 [buildozer]
 log_level = 2
