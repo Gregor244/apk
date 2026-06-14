@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "976715660695",
+    "project_id": "stock-scaner-pro",
+    "storage_bucket": "stock-scaner-pro.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:976715660695:android:7fbb530fd4d74974e958d2",
+        "android_client_info": {
+          "package_name": "org.test.stockscanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA82uOIB2_YhTJfvfNQte0c10tNBQp1Y9w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
