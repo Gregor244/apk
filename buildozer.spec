@@ -9,7 +9,7 @@ source.include_exts = py,kv,png,jpg,json,txt,xml,java
 
 version = 10.0
 
-requirements = python3,kivy==2.3.0,kivymd,httpx,websockets,certifi,pyjnius,plyer
+requirements = python3==3.10.11,kivy==2.2.1,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
 
 orientation = portrait
 fullscreen = 0
@@ -39,7 +39,7 @@ android.gradle_dependencies = com.google.firebase:firebase-messaging:24.1.0,com.
 
 android.release_artifact = apk
 
-p4a.branch = master
+p4a.branch = develop
 
 android.wakelock = True
 
