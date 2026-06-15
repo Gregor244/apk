@@ -20,12 +20,13 @@ android.api = 34
 android.minapi = 26
 android.ndk_api= 26
 android.sdk = 34
-android.ndk = 25b
+android.ndk = 27c
 android.bootstrap = sdl2
 android.build_tools_version = 33.0.2
 
 p4a.bootstrap= sdl2
 p4a.branch= develop
+android.archs = arm64-v8a
 p4a.python_version=3.11
 
 android.accept_sdk_license = True
