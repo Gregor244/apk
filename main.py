@@ -9,7 +9,8 @@ import os
 import threading
 import time
 import webbrowser
-from datetime import datetime, timedelta
+import html
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus
 from xml.etree import ElementTree as ET
@@ -74,6 +75,8 @@ REQUEST_CACHE_TTL = {
     "ticker": 90,
     "company": 180,
     "news": 120,
+    "finnhub_news": 120,
+    "finnhub_earnings":300,
 }
 
 LAST_REQUEST_TIME = {}
@@ -327,6 +330,47 @@ def normalize_company_name(symbol, name=None):
     if cleaned and cleaned.upper() != symbol:
         return cleaned
     return fallback.get(symbol.replace(".WA", "").replace(".PL", ""), cleaned or symbol)
+
+def safe_int(value, d=0):
+    try:
+        return int(float(value))
+    except Exception:
+        return d
+
+def _dt_to_date_text(value):
+    try:
+        ts = int(float(value))
+        return datetime.fromtimestamp(ts, NY_TZ).astimezone(LOCAL_TZ).strftime("%d.%m.%Y")
+    except Exception:
+        return "N/A"
+
+def resolve_symbol(symbol):
+    raw = (symbol or "").strip().upper()
+    actual = CFD_ALIAS.get(raw, raw)
+    return raw, actual
+
+def finnhub_url(endpoint, params=None):
+    params = dict(params or {})
+    params["token"] = FINNHUB_KEY
+    query = "&".join(f"{k}={quote_plus(str(v))}" for k, v in params.items())
+    return f"https://finnhub.io/api/v1/{endpoint.lstrip('/')}?{query}"
+
+async def fetch_json_cached(url, ttl, cache_key=None, timeout=8):
+    key = cache_key or url
+    now = time.time()
+
+    with REQUEST_CACHE_LOCK:
+        cached = REQUEST_CACHE.get(key)
+        if cached and now - cached["ts"] < ttl:
+            return cached["data"]
+
+    res = await safe_request_async(url, timeout=timeout)
+    data = safe_json(res)
+
+    with REQUEST_CACHE_LOCK:
+        REQUEST_CACHE[key] = {"ts": now, "data": data}
+
+    return data
 
 def search_url_from_query(query):
     return f"https://www.google.com/search?q={quote_plus(query)}"
@@ -976,9 +1020,90 @@ analyst_rating = quote.get("recommendationKey", "Brak")
     name = quote_root.get("shortName") or quote_root.get("longName") or profile.get("name") or profile.get("ticker") or raw_symbol
     name = normalize_company_name(actual_symbol, name, display_name=friendly if friendly and not friendly.startswith("^") else None)
 
+async def fetch_ticker(symbol):
+    raw_symbol, actual_symbol = resolve_symbol(symbol)
+    if not actual_symbol:
+        return None
+
+    yahoo_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{actual_symbol}?interval=1d&range=1y"
+    intraday_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{actual_symbol}?interval=1m&range=1d&includePrePost=true"
+    quote_url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={actual_symbol}"
+
+    y_res, i_res, q_res = await asyncio.gather(
+        safe_request_async(yahoo_url, timeout=8),
+        safe_request_async(intraday_url, timeout=8),
+        safe_request_async(quote_url, timeout=6),
+    )
+
+    closes, volumes, chart_meta = [], [], {}
+
+    if getattr(y_res, "status_code", 0) == 200:
+        payload, quote = _extract_chart_payload(safe_json(y_res))
+        chart_meta = payload.get("meta", {})
+        closes = [x for x in quote.get("close", []) if x is not None]
+        volumes = [x for x in quote.get("volume", []) if x is not None]
+
+    fh_q = safe_json(q_res).get("quoteResponse", {}).get("result", [])
+    fh_q = fh_q[0] if fh_q else {}
+
+    session_state = market_status()
+    pre_p = post_p = reg_p = last_trade = 0.0
+    quote_price = safe(fh_q.get("regularMarketPrice", 0.0))
+    quote_prev_close = safe(fh_q.get("regularMarketPreviousClose", 0.0))
+
+    if getattr(i_res, "status_code", 0) == 200:
+        i_payload, i_quote = _extract_chart_payload(safe_json(i_res))
+        i_meta = i_payload.get("meta", {})
+        raw_state = str(i_meta.get("marketState", "") or "").upper().strip()
+
+        if raw_state == "PRE":
+            session_state = "PREMARKET"
+        elif raw_state == "POST":
+            session_state = "POSTMARKET"
+        elif raw_state == "REGULAR":
+            session_state = "OTWARTY"
+
+        pre_scan, regular_scan, post_scan = _extract_intraday_session_prices(i_payload, i_quote)
+        pre_p = pre_scan or safe(i_meta.get("preMarketPrice")) or safe(fh_q.get("preMarketPrice"))
+        post_p = post_scan or safe(i_meta.get("postMarketPrice")) or safe(fh_q.get("postMarketPrice"))
+        reg_p = regular_scan or safe(i_meta.get("regularMarketPrice")) or quote_price
+
+        if i_quote.get("close"):
+            last_trade = safe(i_quote.get("close", [])[-1])
+
+    chart_prev_close = safe(chart_meta.get("previousClose")) or safe(chart_meta.get("chartPreviousClose"))
+    prev_c = quote_prev_close or chart_prev_close or (closes[-2] if len(closes) >= 2 else 0.0)
+
+    current_price = _select_active_price(session_state, prev_c, pre_p, reg_p, post_p, last_trade, quote_price)
+    if current_price <= 0:
+        current_price = quote_price or prev_c
+
+    regular_close = reg_p or quote_prev_close or chart_prev_close or (closes[-1] if closes else 0.0)
+    if regular_close <= 0:
+        regular_close = prev_c
+
+    v10_stats = build_v10_stats(closes, volumes, current_price, prev_c, regular_close=regular_close)
+
+    day_high = safe(fh_q.get("regularMarketDayHigh", 0.0))
+    day_low = safe(fh_q.get("regularMarketDayLow", 0.0))
+    high52 = safe(fh_q.get("fiftyTwoWeekHigh", 0.0))
+    low52 = safe(fh_q.get("fiftyTwoWeekLow", 0.0))
+    market_cap = safe(fh_q.get("marketCap", 0.0))
+    pe = fh_q.get("trailingPE", "N/A")
+    eps = fh_q.get("epsTrailingTwelveMonths", "N/A")
+    next_earnings = fh_q.get("earningsTimestamp", "N/A")
+    analyst_rating = fh_q.get("recommendationKey", "Brak")
+
+    name = normalize_company_name(
+        raw_symbol,
+        fh_q.get("shortName") or fh_q.get("longName"),
+        display_name=CFD_FRIENDLY.get(raw_symbol),
+    )
+
     return {
-        "symbol": symbol,
-        "name": normalize_company_name(symbol, fh_q.get("shortName") or fh_q.get("longName") or symbol),
+        "symbol": actual_symbol,
+        "display_symbol": raw_symbol,
+        "name": name,
         "session_state": session_state,
         "pre_price": safe(pre_p),
         "post_price": safe(post_p),
@@ -1297,34 +1422,36 @@ class ScannerTab(BaseTab):
             self.refresh_data(mode="core")
 
     async def _fetch(self, mode="core", **kwargs):
-        if mode == "gainers":
-            all_tickers = (await fetch_top_gainers_by_type_async("day_gainers"))[:20]
-        else:
-            all_tickers = list(dict.fromkeys(self.static_tickers + NASDAQ_CORE[:8]))
+    if mode == "gainers":
+        all_tickers = (await fetch_top_gainers_by_type_async("day_gainers"))[:20]
+    else:
+        all_tickers = list(dict.fromkeys(self.static_tickers + NASDAQ_CORE[:8]))
 
-        if not all_tickers:
-            return ["[color=#FF0000]Brak wyników.[/color]"]
+    if not all_tickers:
+        return ["[color=#FF0000]Brak wyników.[/color]"]
 
-        bulk_data = await fetch_bulk(all_tickers, chunk_size=4)
-        rows = [f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]"]
+    bulk_data = await fetch_bulk(all_tickers, chunk_size=4)
+    rows = [f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]"]
 
-        pre_gainers, post_gainers, open_gainers = [], [], []
+    pre_gainers, post_gainers, open_gainers = [], [], []
 
-        for sym, d in bulk_data.items():
-            v = d["v10"]
+    for sym, d in bulk_data.items():
+        v = d["v10"]
 
-            if v["scanner_pct"] > 0:
-                if d["session_state"] == "PREMARKET":
-                    pre_gainers.append((v["scanner_pct"], sym))
-                elif d["session_state"] == "POSTMARKET":
-                    post_gainers.append((v["scanner_pct"], sym))
-                else:
-                    open_gainers.append((v["scanner_pct"], sym))
+        if v["scanner_pct"] > 0:
+            if d["session_state"] == "PREMARKET":
+                pre_gainers.append((v["scanner_pct"], sym))
+            elif d["session_state"] == "POSTMARKET":
+                post_gainers.append((v["scanner_pct"], sym))
+            else:
+                open_gainers.append((v["scanner_pct"], sym))
 
-                rows.append(
+            color_pct = "#00AA00" if v["scanner_pct"] >= 0 else "#FF0000"
+
+            rows.append(
                 f"[b]{sym}[/b] — [color=#555555]{d['name']}[/color] | Sesja: [b]{d['session_state']}[/b]\n"
-                f"Cena regular (close): [b]{regular_close:.2f} USD[/b]\n"
-                f"Zmiana (vs prev close): [color={color_pct}]{scanner_diff:+.2f} USD | {scanner_pct:+.2f}%[/color]\n"
+                f"Cena regular (close): [b]{d['regular_price']:.2f} USD[/b]\n"
+                f"Zmiana (vs prev close): [color={color_pct}]{v['scanner_diff']:+.2f} USD | {v['scanner_pct']:+.2f}%[/color]\n"
                 f"Pre: {d['pre_price']:.2f} | Post: {d['post_price']:.2f} | Kapitalizacja: {format_cap(d['market_cap'])}\n"
                 f"SMA30: {d['v10']['sma30']} | SMA90: {d['v10']['sma90']}\n"
                 f"RSI: [color={color_for_rsi(d['v10']['rsi'])}]{d['v10']['rsi']:.1f}[/color] | "
@@ -1334,21 +1461,21 @@ class ScannerTab(BaseTab):
                 f"(AI Score: {d['v10']['prob']}%)"
             )
 
-        leaders_text = "[b][color=#FF9900]🔥 LIDERZY WZROSTÓW WG. SESJI[/color][/b]\n"
-        if pre_gainers:
-            pre_gainers.sort(reverse=True)
-            leaders_text += "PRE-MARKET: " + ", ".join([f"{s} (+{p:.1f}%)" for p, s in pre_gainers[:3]]) + "\n"
-        if open_gainers:
-            open_gainers.sort(reverse=True)
-            leaders_text += "OTWARTA: " + ", ".join([f"{s} (+{p:.1f}%)" for p, s in open_gainers[:3]]) + "\n"
-        if post_gainers:
-            post_gainers.sort(reverse=True)
-            leaders_text += "POST-MARKET: " + ", ".join([f"{s} (+{p:.1f}%)" for p, s in post_gainers[:3]]) + "\n"
+    leaders_text = "[b][color=#FF9900]🔥 LIDERZY WZROSTÓW WG. SESJI[/color][/b]\n"
+    if pre_gainers:
+        pre_gainers.sort(reverse=True)
+        leaders_text += "PRE-MARKET: " + ", ".join([f"{s} (+{p:.1f}%)" for p, s in pre_gainers[:3]]) + "\n"
+    if open_gainers:
+        open_gainers.sort(reverse=True)
+        leaders_text += "OTWARTA: " + ", ".join([f"{s} (+{p:.1f}%)" for p, s in open_gainers[:3]]) + "\n"
+    if post_gainers:
+        post_gainers.sort(reverse=True)
+        leaders_text += "POST-MARKET: " + ", ".join([f"{s} (+{p:.1f}%)" for p, s in post_gainers[:3]]) + "\n"
 
-        if pre_gainers or open_gainers or post_gainers:
-            rows.insert(1, leaders_text)
+    if pre_gainers or open_gainers or post_gainers:
+        rows.insert(1, leaders_text)
 
-        return rows
+    return rows
 
 
 class TickerTab(BaseTab):
@@ -1365,40 +1492,38 @@ class TickerTab(BaseTab):
         self.control_panel.add_widget(row)
         self.control_panel.add_widget(self.more_button)
 
-    async def _fetch(self, *args, **kwargs):
-        sym = (kwargs.get("sym") or "AAPL").strip().upper()
-        if not sym:
-            return ["[color=#888888]Wpisz ticker.[/color]"]
+async def _fetch(self, *args, **kwargs):
+    sym = (kwargs.get("sym") or "AAPL").strip().upper()
+    if not sym:
+        return ["[color=#888888]Wpisz ticker.[/color]"]
 
-        d = await fetch_ticker(sym)
-        if not d:
-            return [f"[color=#FF0000]Brak danych dla: {sym}[/color]"]
+    d = await fetch_ticker(sym)
+    if not d:
+        return [f"[color=#FF0000]Brak danych dla: {sym}[/color]"]
 
-        v = d["v10"]
-        c_pct = "#00AA00" if v["pct"] >= 0 else "#FF0000"
-        next_earnings = d["next_earnings"]
-        if isinstance(next_earnings, (int, float)):
-            next_earnings = _dt_to_date_text(next_earnings)
+    v = d["v10"]
+    c_pct = "#00AA00" if v["pct"] >= 0 else "#FF0000"
+    next_earnings = format_earnings_value(d["next_earnings"])
 
-            return [(
-            f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]\n\n"
-            f"[b]{d['name']} ({sym})[/b] | Sesja: {d['session_state']}\n"
-            f"-------------------------------------------------\n"
-            f"[b]DANE RYNKOWE & FUNDAMENTALNE[/b]\n"
-            f"Cena: [b]{v['price']:.2f} USD[/b] "
-            f"([color={c_pct}]{v['diff']:+.2f} USD | {v['pct']:+.2f}%[/color])\n"
-            f"Cena regular (close): [b]{d['regular_price']:.2f}[/b]\n"
-            f"Pre-Market: {d['pre_price']:.2f} | Post-Market: {d['post_price']:.2f}\n"
-            f"Zakres Dnia: {d['day_low']:.2f}-{d['day_high']:.2f} | 52W: {d['low52']:.2f}-{d['high52']:.2f}\n"
-            f"Kapitalizacja: [b]{format_cap(d['market_cap'])}[/b] | P/E: [b]{d['pe']}[/b] | EPS: [b]{d['eps']}[/b]\n"
-            f"Następne Wyniki: [b]{next_earnings}[/b]\n"
-            f"Rekomendacja: [b]{d['analyst_rating']}[/b]\n\n"
-            f"[b]V10 ANALIZA TECHNICZNA[/b]\n"
-            f"RSI: [color={color_for_rsi(v['rsi'])}]{v['rsi']:.1f}[/color]\n"
-            f"MACD: [color={color_for_macd(v['macd'], v['sig'])}]{v['macd']:.3f}[/color]\n"
-            f"Sygnał: [b][color={v['signal_color']}]{v['signal']}[/color][/b] | AI Score: {v['prob']}%\n"
-            f"Regime: [b]{v['regime']}[/b] | Timing: [b]{v['timing']}[/b]"
-        )]
+    return [(
+        f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]\n\n"
+        f"[b]{d['name']} ({sym})[/b] | Sesja: {d['session_state']}\n"
+        f"-------------------------------------------------\n"
+        f"[b]DANE RYNKOWE & FUNDAMENTALNE[/b]\n"
+        f"Cena: [b]{v['price']:.2f} USD[/b] "
+        f"([color={c_pct}]{v['diff']:+.2f} USD | {v['pct']:+.2f}%[/color])\n"
+        f"Cena regular (close): [b]{d['regular_price']:.2f}[/b]\n"
+        f"Pre-Market: {d['pre_price']:.2f} | Post-Market: {d['post_price']:.2f}\n"
+        f"Zakres Dnia: {d['day_low']:.2f}-{d['day_high']:.2f} | 52W: {d['low52']:.2f}-{d['high52']:.2f}\n"
+        f"Kapitalizacja: [b]{format_cap(d['market_cap'])}[/b] | P/E: [b]{d['pe']}[/b] | EPS: [b]{d['eps']}[/b]\n"
+        f"Następne Wyniki: [b]{next_earnings}[/b]\n"
+        f"Rekomendacja: [b]{d['analyst_rating']}[/b]\n\n"
+        f"[b]V10 ANALIZA TECHNICZNA[/b]\n"
+        f"RSI: [color={color_for_rsi(v['rsi'])}]{v['rsi']:.1f}[/color]\n"
+        f"MACD: [color={color_for_macd(v['macd'], v['sig'])}]{v['macd']:.3f}[/color]\n"
+        f"Sygnał: [b][color={v['signal_color']}]{v['signal']}[/color][/b] | AI Score: {v['prob']}%\n"
+        f"Regime: [b]{v['regime']}[/b] | Timing: [b]{v['timing']}[/b]"
+    )]    
 
 def _news_headline_text(title, url):
     safe_title = html.escape(title or "").strip()
@@ -1573,32 +1698,31 @@ class CFDTab(BaseTab):
             self.cfd_tickers.remove(t)
             self.refresh_data()
 
-    async def _fetch(self, *args, **kwargs):
-        rows = [f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]"]
-        for sym in self.cfd_tickers:
-            d = await fetch_ticker(sym)
-            if not d:
-                continue
-            v = d["v10"]
-            display_name = d["name"]
-            display_symbol = d["display_symbol"] if d["display_symbol"] != d["symbol"] else sym
+async def _fetch(self, *args, **kwargs):
+    rows = [f"[color=#888888]Ostatnia aktualizacja: {timestamp_text()}[/color]"]
+    for sym in self.cfd_tickers:
+        d = await fetch_ticker(sym)
+        if not d:
+            continue
+        v = d["v10"]
+        display_name = d["name"]
+        display_symbol = d.get("display_symbol", sym)
 
-            tp, sl = make_tp_sl(v["price"])
-            tp_text = f"{tp:.2f}" if tp else "N/A"
-            sl_text = f"{sl:.2f}" if sl else "N/A"
+        tp, sl = make_tp_sl(v["price"])
+        tp_text = f"{tp:.2f}" if tp else "N/A"
+        sl_text = f"{sl:.2f}" if sl else "N/A"
 
-            rows.append(
-                f"[b]{display_name} ({display_symbol})[/b]\n"
-                f"Cena: [b]{v['price']:.4f}[/b] | Regular: {d['regular_price']:.4f}\n"
-                f"RSI: [color={color_for_rsi(v['rsi'])}]{v['rsi']:.1f}[/color] | "
-                f"MACD: [color={color_for_macd(v['macd'], v['sig'])}]{v['macd']:.3f}[/color] | "
-                f"Hist: {format_histogram(v['hist'])}\n"
-                f"TP/SL: [color=#00AA00]{tp_text}[/color] / [color=#FF3333]{sl_text}[/color]\n"
-                f"Sygnał: [b][color={v['signal_color']}]{v['signal']}[/color][/b] | AI: {v['prob']}%"
-            )
-        return rows
-
-
+        rows.append(
+            f"[b]{display_name} ({display_symbol})[/b]\n"
+            f"Cena: [b]{v['price']:.4f}[/b] | Regular: {d['regular_price']:.4f}\n"
+            f"RSI: [color={color_for_rsi(v['rsi'])}]{v['rsi']:.1f}[/color] | "
+            f"MACD: [color={color_for_macd(v['macd'], v['sig'])}]{v['macd']:.3f}[/color] | "
+            f"Hist: {format_histogram(v['hist'])}\n"
+            f"TP/SL: [color=#00AA00]{tp_text}[/color] / [color=#FF3333]{sl_text}[/color]\n"
+            f"Sygnał: [b][color={v['signal_color']}]{v['signal']}[/color][/b] | AI: {v['prob']}%"
+        )
+    return rows    
+    
 # =========================================
 # APP MAIN
 # =========================================
