@@ -16,16 +16,16 @@ requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.0,kivymd==1.2.0,htt
 orientation = portrait
 fullscreen = 0
 
-android.api = 33
-android.minapi = 24
-android.ndk_api= 24
-android.sdk = 33
-android.ndk = 25c
+android.api = 34
+android.minapi = 26
+android.ndk_api= 26
+android.sdk = 34
+android.ndk = 25b
 android.bootstrap = sdl2
 android.build_tools_version = 33.0.2
 
 p4a.bootstrap= sdl2
-p4a.branch= master
+p4a.branch= develop
 
 android.accept_sdk_license = True
 android.enable_androidx = True
@@ -49,6 +49,7 @@ android.gradle_dependencies = com.google.firebase:firebase-messaging:24.1.0,com.
 
 android.release_artifact = apk
 
+p4a.fork = kivy p4a.url = https://github.com/kivy/python-for-android.git
 
 android.wakelock = True
 
