@@ -9,7 +9,7 @@ source.include_exts = py,kv,png,jpg,json,txt,xml,java
 
 version = 10.0
 
-requirements = python3==3.10.11,kivy==2.2.1,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
+requirements = python3==3.11.9,kivy==2.3.0,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
 
 orientation = portrait
 fullscreen = 0
