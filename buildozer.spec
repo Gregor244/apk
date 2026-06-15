@@ -9,16 +9,20 @@ source.include_exts = py,kv,png,jpg,json,txt,xml,java
 
 version = 10.0
 
-requirements = python3==3.11.9,kivy==2.3.0,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
+requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.0,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
 
 orientation = portrait
 fullscreen = 0
 
 android.api = 34
 android.minapi = 26
+android.ndk_api= 26
 android.sdk = 34
 android.ndk = 25b
 android.bootstrap = sdl2
+
+p4a.bootstrap= sdl2
+p4a.branch= master
 
 android.accept_sdk_license = True
 android.enable_androidx = True
@@ -26,6 +30,8 @@ android.enable_androidx = True
 android.permissions = INTERNET,POST_NOTIFICATIONS,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,WAKE_LOCK,VIBRATE,RECEIVE_BOOT_COMPLETED,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 
 android.add_src = ./src/main/java
+
+android.extra_manifest_xml = ./android_manifest.xml
 
 android.google_services_json = google-services.json
 
@@ -40,7 +46,6 @@ android.gradle_dependencies = com.google.firebase:firebase-messaging:24.1.0,com.
 
 android.release_artifact = apk
 
-p4a.branch = stable
 
 android.wakelock = True
 
