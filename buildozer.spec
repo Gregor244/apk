@@ -19,6 +19,7 @@ android.minapi = 26
 android.sdk = 34
 android.ndk = 25b
 android.ard_src = src/main/java
+android.release_artifact = apk
 
 android.accept_sdk_license = True
 android.enable_androidx = True
