@@ -37,11 +37,12 @@ jobs:
 
       - name: Full clean build cache
         run: |
-          rm -rf .buildozer
-          rm -rf bin
-          rm -rf ~/.buildozer
-          rm -rf ~/.gradle/caches
-          rm -rf ~/.local/share/python-for-android
+            rm -rf .buildozer
+            rm -rf bin
+            rm -rf ~/.buildozer
+            rm -rf ~/.gradle/caches
+            rm -rf ~/.local/share/python-for-android
+
     
       - name: Clean caches
         run: |
