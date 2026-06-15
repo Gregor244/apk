@@ -34,10 +34,8 @@ p4a.extra_manifest_xml = ./android_manifest.xml
 
 services = ScannerService:service.py
 
-android.gradle_dependencies = 
-com.google.firebase:firebase-messaging:24.1.0,
-com.google.firebase:firebase-analytics:22.1.0,
-androidx.core:core:1.13.1
+android.gradle_dependencies = com.google.firebase:firebase-messaging:24.1.0,com.google.firebase:firebase-analytics:22.1.0,androidx.core:core:1.13.1
+
 
 android.release_artifact = apk
 
