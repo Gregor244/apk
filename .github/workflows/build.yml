@@ -57,11 +57,13 @@ jobs:
 
       - name: Install Buildozer
         run: |
-          python -m pip install --upgrade pip
-          pip install cython==0.29.36
-          pip install buildozer
-          pip install virtualenv
-          buildozer --version
+         pip install --upgrade pip setuptools wheel
+         pip install cython==0.29.36
+         pip install buildozer==1.4.0
+         pip install python-for-android==2024.01.21
+         pip install virtualenv
+         buildozer --version
+
 
       - name: Clean and build APK
         run: |
