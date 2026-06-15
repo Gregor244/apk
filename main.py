@@ -956,19 +956,25 @@ async def fetch_ticker(symbol):
 
     v10_stats = build_v10_stats(closes, volumes, current_price, prev_c, regular_close=regular_close)
 
-    day_high = safe(q_root.get("regularMarketDayHigh", 0.0) or fh_quote.get("h", 0.0))
-    day_low = safe(q_root.get("regularMarketDayLow", 0.0) or fh_quote.get("l", 0.0))
-    high52 = safe(q_root.get("fiftyTwoWeekHigh", 0.0))
-    low52 = safe(q_root.get("fiftyTwoWeekLow", 0.0))
-    market_cap = safe(q_root.get("marketCap", 0.0) or profile.get("marketCapitalization", 0.0))
-    pe = q_root.get("trailingPE", "N/A")
-    eps = q_root.get("epsTrailingTwelveMonths", "N/A")
-    next_earnings = q_root.get("earningsTimestamp", "N/A")
-    analyst_rating = q_root.get("recommendationKey", "Brak")
+day_high = safe(quote.get("regularMarketDayHigh", 0.0) or fh_quote.get("h", 0.0))
+day_low = safe(quote.get("regularMarketDayLow", 0.0) or fh_quote.get("l", 0.0))
 
-    name = q_root.get("shortName") or q_root.get("longName") or profile.get("name") or profile.get("ticker") or raw_symbol
+high52 = safe(quote.get("fiftyTwoWeekHigh", 0.0))
+low52 = safe(quote.get("fiftyTwoWeekLow", 0.0))
+
+market_cap = safe(
+    quote.get("marketCap", 0.0)
+    or profile.get("marketCapitalization", 0.0)
+)
+
+pe = quote.get("trailingPE", "N/A")
+eps = quote.get("epsTrailingTwelveMonths", "N/A")
+
+next_earnings = quote.get("earningsTimestamp", "N/A")
+analyst_rating = quote.get("recommendationKey", "Brak")
+
+    name = quote_root.get("shortName") or quote_root.get("longName") or profile.get("name") or profile.get("ticker") or raw_symbol
     name = normalize_company_name(actual_symbol, name, display_name=friendly if friendly and not friendly.startswith("^") else None)
-
 
     return {
         "symbol": symbol,
