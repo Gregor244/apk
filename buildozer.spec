@@ -39,7 +39,7 @@ android.gradle_dependencies = com.google.firebase:firebase-messaging:24.1.0,com.
 
 android.release_artifact = apk
 
-p4a.branch = develop
+p4a.branch = master
 
 android.wakelock = True
 
