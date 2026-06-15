@@ -18,6 +18,7 @@ android.api = 34
 android.minapi = 26
 android.sdk = 34
 android.ndk = 25b
+android.bootstrap = sdl2
 
 android.accept_sdk_license = True
 android.enable_androidx = True
@@ -39,7 +40,7 @@ android.gradle_dependencies = com.google.firebase:firebase-messaging:24.1.0,com.
 
 android.release_artifact = apk
 
-p4a.branch = master
+p4a.branch = stable
 
 android.wakelock = True
 
