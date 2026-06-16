@@ -60,6 +60,19 @@ except:
 
         def __call__(self, *args, **kwargs):
             return self.tz
+
+class ZoneInfoFallback:
+    def __init__(self, name):
+        self.name = name
+
+    def tzname(self, dt=None):
+        return self.name
+
+    def utcoffset(self, dt=None):
+        return timezone.utc.utcoffset(dt)
+
+ZoneInfo = ZoneInfoFallback
+
 # =========================================
 # CONFIG
 # =========================================
@@ -99,7 +112,7 @@ REQUEST_CACHE_TTL = {
 }
 
 LAST_REQUEST_TIME = {}
-RATE_LIMIT_LOCK = threading.Lock()
+RATE_LIMIT_LOCK = asyncio.Lock()
 
 ASYNC_LOOP = None
 ASYNC_LOOP_READY = threading.Event()
@@ -201,6 +214,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "v10_state.json")
 
 def init_firebase():
+    if not ANDROID:
+        return
+
     try:
         FirebaseMessaging = autoclass("com.google.firebase.messaging.FirebaseMessaging")
         FirebaseMessaging.getInstance().getToken()
@@ -216,9 +232,9 @@ def start_async_loop():
     try:
         ASYNC_LOOP = asyncio.new_event_loop()
         asyncio.set_event_loop(ASYNC_LOOP)
+
         ASYNC_LOOP_READY.set()
 
-        # 🔥 watchdog wrapper (Android crash protection)
         ASYNC_LOOP.run_forever()
 
     except Exception as e:
@@ -329,8 +345,8 @@ def us_market_hours_text_local():
     try:
         now_ny = datetime.now(NY_TZ)
         base_date = now_ny.date()
-        pre_end = datetime(base_date.year, base_date.month, base_date.day, 9, 30, tzinfo=NY_TZ).astimezone(LOCAL_TZ)
-        reg_end = datetime(base_date.year, base_date.month, base_date.day, 16, 0, tzinfo=NY_TZ).astimezone(LOCAL_TZ)
+        pre_end = datetime(base_date.year, base_date.month, base_date.day, 9, 30, replace(tzinfo=NY_TZ).astimezone(LOCAL_TZ)
+        reg_end = datetime(base_date.year, base_date.month, base_date.day, 16, 0, replace(tzinfo=NY_TZ).astimezone(LOCAL_TZ)
         return (
             "[b]Rynek USA — godziny sesji (ET / czas lokalny CET/CEST)[/b]\n"
             f"• [b]Pre-Market[/b]: 04:00–09:30 ET / ...–{pre_end.strftime('%H:%M %Z')}\n"
@@ -381,8 +397,12 @@ async def fetch_json_cached(url, ttl, cache_key=None, timeout=8):
         if cached and now - cached["ts"] < ttl:
             return cached["data"]
 
-    res = await safe_request_async(url, timeout=timeout)
-    data = safe_json(res)
+res = await safe_request_async(url, timeout=timeout)
+
+if not res:
+    return {}
+
+data = safe_json(res)
 
     with REQUEST_CACHE_LOCK:
         REQUEST_CACHE[key] = {"ts": now, "data": data}
@@ -1796,16 +1816,15 @@ def on_stop(self):
     global HTTP_CLIENT
 
     try:
-        client = HTTP_CLIENT
-        HTTP_CLIENT = None
-
-        if client:
+        if HTTP_CLIENT and ASYNC_LOOP and ASYNC_LOOP.is_running():
             asyncio.run_coroutine_threadsafe(
-                client.aclose(),
+                HTTP_CLIENT.aclose(),
                 ASYNC_LOOP
             )
     except:
         pass
+
+    HTTP_CLIENT = None
     
 if __name__ == "__main__":
     StockScanner().run()
