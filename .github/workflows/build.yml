@@ -62,6 +62,9 @@ jobs:
             rm -rf ~/.buildozer
             rm -rf ~/.gradle/caches
             rm -rf ~/.local/share/python-for-android
+            rm -rf /home/runner/work/apk/apk/.buildozer
+            rm -rf /home/runner/.buildozer
+            rm -rf /home/runner/.python-for-android
 
     
       - name: Clean caches
