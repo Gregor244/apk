@@ -71,7 +71,6 @@ class ZoneInfoFallback:
     def utcoffset(self, dt=None):
         return timezone.utc.utcoffset(dt)
 
-ZoneInfo = ZoneInfoFallback
 
 # =========================================
 # CONFIG
@@ -93,7 +92,10 @@ def get_http_client():
                 max_keepalive_connections=10
             ),
             http2=False,  # 🔥 Android safer than http2
-            verify=certifi.where()
+            try:
+    verify=certifi.where()
+except:
+    verify=False
         )
     return HTTP_CLIENT
 
@@ -230,12 +232,14 @@ def init_firebase():
 def start_async_loop():
     global ASYNC_LOOP
     try:
-        ASYNC_LOOP = asyncio.new_event_loop()
-        asyncio.set_event_loop(ASYNC_LOOP)
+ASYNC_LOOP = asyncio.new_event_loop()
+asyncio.set_event_loop(ASYNC_LOOP)
 
-        ASYNC_LOOP_READY.set()
+def _start():
+    ASYNC_LOOP_READY.set()
+    ASYNC_LOOP.run_forever()
 
-        ASYNC_LOOP.run_forever()
+threading.Thread(target=_start, daemon=True).start()
 
     except Exception as e:
         print("[ASYNC LOOP CRASH]", e)
@@ -397,12 +401,12 @@ async def fetch_json_cached(url, ttl, cache_key=None, timeout=8):
         if cached and now - cached["ts"] < ttl:
             return cached["data"]
 
-res = await safe_request_async(url, timeout=timeout)
+    res = await safe_request_async(url, timeout=timeout)
 
-if not res:
-    return {}
+    if not res:
+        return {}
 
-data = safe_json(res)
+    data = safe_json(res)
 
     with REQUEST_CACHE_LOCK:
         REQUEST_CACHE[key] = {"ts": now, "data": data}
@@ -1185,7 +1189,6 @@ def run_coro(coro):
 
     try:
         future = asyncio.run_coroutine_threadsafe(coro, ASYNC_LOOP)
-        return future.result(timeout=10)
 
     except Exception as e:
         print("[run_coro error]", e)
@@ -1246,7 +1249,6 @@ KV = '''
         padding: dp(8)
 '''
 Builder.load_string(KV)
-
 
 class BaseTab(MDBoxLayout, MDTabsBase):
     def __init__(self, **kwargs):
@@ -1371,8 +1373,6 @@ class InfoTab(BaseTab):
             us_market_hours_text_local(),
             build_full_glossary(),
         ]
-
-
 
 class ScannerTab(BaseTab):
     title = "Skaner"
