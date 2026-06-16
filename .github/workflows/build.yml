@@ -54,9 +54,7 @@ jobs:
         run: |
          echo "P4A_PYTHON_VERSION=3.10" >> $GITHUB_ENV
          echo "P4A_BRANCH=release-2023.09.16" >> $GITHUB_ENV
-         echo "BUILD_ZEUG=1" >> $GITHUB_ENV
 
-    
       - name: Build APK
         run: buildozer android debug
 
