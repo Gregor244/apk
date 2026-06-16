@@ -37,8 +37,8 @@ jobs:
           rm -rf ~/.gradle/caches
           rm -rf ~/.cache 
 
-          - name: Install pinned python-for-android
-          run: |
+      - name: Install pinned python-for-android
+        run: |
           pip install git+https://github.com/kivy/python-for-android@release-2023.09.16
 
       - name: Upgrade pip
