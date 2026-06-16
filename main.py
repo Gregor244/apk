@@ -51,9 +51,15 @@ except Exception:
 
 try:
     from zoneinfo import ZoneInfo
-except Exception:
+except:
     from datetime import timezone
-    ZoneInfo = lambda x: timezone.utc
+
+    class ZoneInfo:
+        def __init__(self, name):
+            self.tz = timezone.utc
+
+        def __call__(self, *args, **kwargs):
+            return self.tz
 # =========================================
 # CONFIG
 # =========================================
@@ -74,7 +80,7 @@ def get_http_client():
                 max_keepalive_connections=10
             ),
             http2=False,  # 🔥 Android safer than http2
-            verify=False  # 🔥 avoids cert issues on old Android builds
+            verify=certifi.where()
         )
     return HTTP_CLIENT
 
@@ -93,7 +99,7 @@ REQUEST_CACHE_TTL = {
 }
 
 LAST_REQUEST_TIME = {}
-RATE_LIMIT_LOCK = asyncio.Lock()
+RATE_LIMIT_LOCK = threading.Lock()
 
 ASYNC_LOOP = None
 ASYNC_LOOP_READY = threading.Event()
@@ -195,7 +201,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "v10_state.json")
 
 def init_firebase():
-try:
+    try:
         FirebaseMessaging = autoclass("com.google.firebase.messaging.FirebaseMessaging")
         FirebaseMessaging.getInstance().getToken()
     except:
@@ -762,17 +768,12 @@ async def safe_request_async(url, timeout=8, retries=MAX_RETRIES):
                 return response
 
             if response.status_code in (429, 500, 502, 503, 504):
-                await asyncio.sleep(min(2 ** i, 8))  # 🔥 capped backoff
+                await asyncio.sleep(min(2 ** i, 8))
                 continue
 
             return response
 
-        except asyncio.TimeoutError:
-            await asyncio.sleep(min(2 ** i, 8))
-            continue
-
-        except Exception as e:
-            print("[HTTP ERROR]", e)
+        except Exception:
             await asyncio.sleep(min(2 ** i, 8))
             continue
 
