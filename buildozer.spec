@@ -11,7 +11,7 @@ icon.filename = %(source.dir)s/icon.png
 
 version = 10.0
 
-requirements = python3,hostpython3,kivy==2.3.0,kivymd==1.2.0,httpx,websockets,certifi,pyjnius,plyer
+requirements = python3,kivy==2.3.0,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
 
 orientation = portrait
 fullscreen = 0
@@ -20,7 +20,7 @@ android.api = 34
 android.minapi = 26
 android.ndk_api= 26
 android.sdk = 34
-android.ndk = 27c
+android.ndk = 25b
 android.bootstrap = sdl2
 android.build_tools_version = 33.0.2
 
