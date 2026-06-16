@@ -42,7 +42,6 @@ jobs:
           pip uninstall -y cython
           pip install cython==0.29.36
           python -m pip install --upgrade pip
-          python -m pip install "cython>=3.0.0" buildozer
           git clone https://github.com/kivy/python-for-android.git p4a-custom
           rm -rf p4a-custom/pythonforandroid/recipes/libthorvg
           mkdir -p p4a-custom/pythonforandroid/recipes/libthorvg
@@ -53,6 +52,8 @@ jobs:
           sed -i '/p4a.branch/d' buildozer.spec
           sed -i '/^\[app\]/a p4a.source_dir = '"$(pwd)"'/p4a-custom' buildozer.spec
           echo "pip<24.0" > /tmp/pip-constraint.txt
+          sed -i 's/version = "3.14.0"/version = "3.11.9"/g' \
+          p4a-custom/pythonforandroid/recipes/python3/__init__.py
 
       - name: Full clean build cache
         run: |
@@ -81,7 +82,6 @@ jobs:
          pip install --upgrade pip setuptools wheel
          pip install cython==0.29.36
          pip install buildozer==1.4.0
-         pip install python-for-android==2024.01.21
          pip install virtualenv
          buildozer --version
 
