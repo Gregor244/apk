@@ -11,7 +11,7 @@ icon.filename = %(source.dir)s/icon.png
 
 version = 10.0
 
-requirements = python3,kivy==2.3.0,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
+requirements = python3==3.10.14,kivy==2.2.1,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
 
 orientation = portrait
 fullscreen = 0
