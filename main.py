@@ -11,7 +11,6 @@ import time
 import webbrowser
 import html
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus
 from xml.etree import ElementTree as ET
 from html import unescape
@@ -50,6 +49,11 @@ except Exception:
     request_permissions = None
     autoclass = None
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    from datetime import timezone
+    ZoneInfo = lambda x: timezone.utc
 # =========================================
 # CONFIG
 # =========================================
@@ -57,13 +61,22 @@ except Exception:
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 FINNHUB_KEY = "d82t3s1r01ql4onfbbngd82t3s1r01ql4onfbbo0"
 
-HTTP_CLIENT = httpx.AsyncClient(
-    headers=HEADERS,
-    verify=certifi.where(),
-    timeout=10.0,
-    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-    http2=True,
-)
+HTTP_CLIENT = None
+
+def get_http_client():
+    global HTTP_CLIENT
+    if HTTP_CLIENT is None:
+        HTTP_CLIENT = httpx.AsyncClient(
+            headers=HEADERS,
+            timeout=httpx.Timeout(10.0),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10
+            ),
+            http2=False,  # 🔥 Android safer than http2
+            verify=False  # 🔥 avoids cert issues on old Android builds
+        )
+    return HTTP_CLIENT
 
 REQUEST_DELAY = 0.15
 MAX_RETRIES = 2
@@ -181,13 +194,12 @@ SERVICE_NAME = "ScannerService"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(BASE_DIR, "v10_state.json")
 
-FirebaseMessaging = None
-if ANDROID:
-    try:
+def init_firebase():
+try:
         FirebaseMessaging = autoclass("com.google.firebase.messaging.FirebaseMessaging")
         FirebaseMessaging.getInstance().getToken()
-    except Exception:
-        FirebaseMessaging = None
+    except:
+        pass
 
 # =========================================
 # ASYNC LOOP
@@ -195,22 +207,21 @@ if ANDROID:
 
 def start_async_loop():
     global ASYNC_LOOP
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    ASYNC_LOOP = loop
-    ASYNC_LOOP_READY.set()
-    loop.run_forever()
+    try:
+        ASYNC_LOOP = asyncio.new_event_loop()
+        asyncio.set_event_loop(ASYNC_LOOP)
+        ASYNC_LOOP_READY.set()
 
-threading.Thread(target=start_async_loop, daemon=True).start()
+        # 🔥 watchdog wrapper (Android crash protection)
+        ASYNC_LOOP.run_forever()
 
-def run_coro(coro):
-    if ASYNC_LOOP is None or not ASYNC_LOOP.is_running():
+    except Exception as e:
+        print("[ASYNC LOOP CRASH]", e)
+    finally:
         try:
-            coro.close()
-        except Exception:
+            ASYNC_LOOP.close()
+        except:
             pass
-        return None
-    return asyncio.run_coroutine_threadsafe(coro, ASYNC_LOOP)
 
 # =========================================
 # HELPERS
@@ -699,6 +710,15 @@ class LiveV10Engine:
             }
         return None
 
+_last_ui_ping = time.time()
+
+def ui_watchdog(dt):
+    global _last_ui_ping
+    if time.time() - _last_ui_ping > 10:
+        print("[WARNING] UI stalled")
+
+Clock.schedule_interval(ui_watchdog, 5)
+
 # =========================================
 # STATE
 # =========================================
@@ -723,30 +743,41 @@ def write_state(data):
 
 async def safe_request_async(url, timeout=8, retries=MAX_RETRIES):
     host = url.split("/")[2] if "://" in url else "default"
+    client = get_http_client()
+
     for i in range(retries):
-        async with RATE_LIMIT_LOCK:
-            now = time.time()
-            diff = now - LAST_REQUEST_TIME.get(host, 0)
-            if diff < REQUEST_DELAY:
-                await asyncio.sleep(REQUEST_DELAY - diff)
-            LAST_REQUEST_TIME[host] = time.time()
         try:
-            response = await HTTP_CLIENT.get(url, timeout=timeout)
+            async with RATE_LIMIT_LOCK:
+                now = time.time()
+                diff = now - LAST_REQUEST_TIME.get(host, 0)
+
+                if diff < REQUEST_DELAY:
+                    await asyncio.sleep(REQUEST_DELAY - diff)
+
+                LAST_REQUEST_TIME[host] = time.time()
+
+            response = await client.get(url, timeout=timeout)
+
             if response.status_code in (200, 404):
                 return response
+
             if response.status_code in (429, 500, 502, 503, 504):
-                await asyncio.sleep(1.0 * (i + 1))
+                await asyncio.sleep(min(2 ** i, 8))  # 🔥 capped backoff
                 continue
+
             return response
-        except Exception:
-            await asyncio.sleep(0.8 * (i + 1))
 
-    class Dummy:
-        status_code = 0
-        def json(self):
-            return {}
-    return Dummy()
+        except asyncio.TimeoutError:
+            await asyncio.sleep(min(2 ** i, 8))
+            continue
 
+        except Exception as e:
+            print("[HTTP ERROR]", e)
+            await asyncio.sleep(min(2 ** i, 8))
+            continue
+
+    return None
+    
 def _extract_chart_payload(yahoo_json):
     result = yahoo_json.get("chart", {}).get("result", [])
     if not result:
@@ -935,120 +966,6 @@ def build_v10_stats(closes, volumes, current_price, prev_close, regular_close=No
         "signal_color": sig_color,
     }
 
-
-async def fetch_ticker(symbol):
-    symbol = (symbol or "").strip().upper()
-    if not symbol:
-        return None
-
-    yahoo_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=1y"
-    intraday_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1m&range=1d&includePrePost=true"
-    quote_url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={symbol}"
-
-    y_res, i_res, q_res = await asyncio.gather(
-        safe_request_async(yahoo_url, timeout=8),
-        safe_request_async(intraday_url, timeout=8),
-        safe_request_async(quote_url, timeout=6),
-    )
-
-    closes, volumes, chart_meta = [], [], {}
-    if getattr(y_res, "status_code", 0) == 200:
-        payload, quote = _extract_chart_payload(safe_json(y_res))
-        chart_meta = payload.get("meta", {})
-        closes = [x for x in quote.get("close", []) if x is not None]
-        volumes = [x for x in quote.get("volume", []) if x is not None]
-
-    fh_q = safe_json(q_res).get("quoteResponse", {}).get("result", [])
-    fh_q = fh_q[0] if fh_q else {}
-
-    session_state = market_status()
-    pre_p = post_p = reg_p = last_trade = 0.0
-    quote_price = safe(fh_q.get("regularMarketPrice", 0.0))
-    quote_prev_close = safe(fh_q.get("regularMarketPreviousClose", 0.0))
-
-    if getattr(i_res, "status_code", 0) == 200:
-        i_payload, i_quote = _extract_chart_payload(safe_json(i_res))
-        i_meta = i_payload.get("meta", {})
-        raw_state = str(i_meta.get("marketState", "") or "").upper().strip()
-
-        if raw_state == "PRE":
-            session_state = "PREMARKET"
-        elif raw_state == "POST":
-            session_state = "POSTMARKET"
-        elif raw_state == "REGULAR":
-            session_state = "OTWARTY"
-
-        pre_scan, regular_scan, post_scan = _extract_intraday_session_prices(i_payload, i_quote)
-        pre_p = pre_scan or safe(i_meta.get("preMarketPrice")) or safe(fh_q.get("preMarketPrice"))
-        post_p = post_scan or safe(i_meta.get("postMarketPrice")) or safe(fh_q.get("postMarketPrice"))
-        reg_p = regular_scan or safe(i_meta.get("regularMarketPrice")) or quote_price
-
-        if i_quote.get("close"):
-            last_trade = safe(i_quote.get("close", [])[-1])
-
-    chart_prev_close = safe(chart_meta.get("previousClose")) or safe(chart_meta.get("chartPreviousClose"))
-    prev_c = quote_prev_close or chart_prev_close or (closes[-2] if len(closes) >= 2 else 0.0)
-    current_price = _select_active_price(session_state, prev_c, pre_p, reg_p, post_p, last_trade, quote_price)
-
-    if current_price <= 0:
-        current_price = quote_price or prev_c
-
-    # Regular close should be the basis for scanner diff, not the pre/post price.
-    regular_close = reg_p or quote_prev_close or chart_prev_close or (closes[-1] if closes else 0.0)
-    if regular_close <= 0:
-        regular_close = prev_c
-
-    v10_stats = build_v10_stats(
-        closes,
-        volumes,
-        current_price,
-        prev_c,
-        regular_close=regular_close
-    )
-
-    day_high = safe(
-        fh_q.get("regularMarketDayHigh", 0.0)
-    )
-
-    day_low = safe(
-        fh_q.get("regularMarketDayLow", 0.0)
-    )
-
-    high52 = safe(
-        fh_q.get("fiftyTwoWeekHigh", 0.0)
-    )
-
-    low52 = safe(
-        fh_q.get("fiftyTwoWeekLow", 0.0)
-    )
-
-    market_cap = safe(
-        fh_q.get("marketCap", 0.0)
-    )
-
-    pe = fh_q.get("trailingPE", "N/A")
-
-    eps = fh_q.get(
-        "epsTrailingTwelveMonths",
-        "N/A"
-    )
-
-    next_earnings = fh_q.get(
-        "earningsTimestamp",
-        "N/A"
-    )
-
-    analyst_rating = fh_q.get(
-        "recommendationKey",
-        "Brak"
-    )
-
-    name = (
-        fh_q.get("shortName")
-        or fh_q.get("longName")
-        or raw_symbol
-)
-
 async def fetch_ticker(symbol):
     raw_symbol = (symbol or "").strip().upper()
 
@@ -1236,6 +1153,22 @@ async def fetch_earnings_window(days_forward=7):
         return data
     return []
 
+def run_coro(coro):
+    global ASYNC_LOOP
+
+    if not ASYNC_LOOP_READY.wait(timeout=5):
+        return None
+
+    if ASYNC_LOOP is None:
+        return None
+
+    try:
+        future = asyncio.run_coroutine_threadsafe(coro, ASYNC_LOOP)
+        return future.result(timeout=10)
+
+    except Exception as e:
+        print("[run_coro error]", e)
+        return None
 
 # =========================================
 # UI
@@ -1854,8 +1787,24 @@ class StockScanner(MDApp):
     def on_start(self):
         ASYNC_LOOP_READY.wait(timeout=5)
         self.start_foreground_service()
+        init_firebase()
         self.request_battery_optimization_exception()
         Clock.schedule_once(lambda dt: self.info_tab.load_data_if_needed(), 0.2)
 
+def on_stop(self):
+    global HTTP_CLIENT
+
+    try:
+        client = HTTP_CLIENT
+        HTTP_CLIENT = None
+
+        if client:
+            asyncio.run_coroutine_threadsafe(
+                client.aclose(),
+                ASYNC_LOOP
+            )
+    except:
+        pass
+    
 if __name__ == "__main__":
     StockScanner().run()
