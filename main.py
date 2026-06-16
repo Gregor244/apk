@@ -695,9 +695,14 @@ async def fetch_ticker(symbol):
     if not raw_symbol:
         return None
 
-    actual_symbol = SMART_COMMODITIES.get(raw_symbol, CFD_ALIAS.get(raw_symbol, raw_symbol))
+    actual_symbol = SMART_COMMODITIES.get(
+        raw_symbol,
+        CFD_ALIAS.get(raw_symbol, raw_symbol)
+    )
 
-    # Yahoo chart zwykle działa stabilniej niż quote.
+    # -------------------------
+    # Yahoo endpoints
+    # -------------------------
     y_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{actual_symbol}?interval=1d&range=1y"
     i_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{actual_symbol}?interval=1m&range=1d&includePrePost=true"
     q_url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={actual_symbol}"
@@ -709,44 +714,64 @@ async def fetch_ticker(symbol):
         return_exceptions=True
     )
 
+    # -------------------------
+    # Finnhub fallback metrics
+    # -------------------------
+    clean_sym = actual_symbol.split('.')[0].replace("=X", "").replace("=F", "")
+
+    def init_state():
+        return {
+            "closes": [],
+            "fq": {},
+            "session_state": market_status(),
+            "payload": {},
+            "quote": {}
+        }
+
+    state = init_state()
     closes = []
     fq = {}
-    session_state = market_status()
+    session_state = state["session_state"]
 
-    # --- history chart ---
+    # -------------------------
+    # CHART (history)
+    # -------------------------
     if not isinstance(y_res, Exception) and getattr(y_res, "status_code", 0) == 200:
         try:
             y_json = _response_json(y_res)
             payload, quote = _extract_chart_payload(y_json)
+            state["payload"] = payload
+            state["quote"] = quote
             closes = [x for x in (quote.get("close") or []) if x is not None]
         except Exception:
             payload, quote = {}, {}
     else:
         payload, quote = {}, {}
 
-    # --- quote response (if available) ---
+    # -------------------------
+    # QUOTE
+    # -------------------------
     q_status = getattr(q_res, "status_code", 0) if not isinstance(q_res, Exception) else 0
+
     if q_status == 200:
         try:
             q_json = _response_json(q_res)
             res_list = q_json.get("quoteResponse", {}).get("result", []) or []
-            if res_list:
-                fq = res_list[0] or {}
+            fq = res_list[0] if res_list else {}
         except Exception:
             fq = {}
-    elif q_status == 401:
-        # Yahoo quote blokuje częściej; nie przerywamy, tylko przechodzimy na fallback z chart/meta.
-        fq = {}
-    elif not isinstance(q_res, Exception):
-        fq = {}
 
-    # --- intraday chart / session state ---
-    pre_p = post_p = reg_p = last_trade = 0.0
+    # -------------------------
+    # PRICES
+    # -------------------------
     quote_price = safe(fq.get("regularMarketPrice", 0.0))
     open_price = safe(fq.get("regularMarketOpen", 0.0))
     quote_prev_close = safe(fq.get("regularMarketPreviousClose", 0.0))
 
+    pre_p = post_p = reg_p = last_trade = 0.0
+
     intraday_prev_close = 0.0
+
     if not isinstance(i_res, Exception) and getattr(i_res, "status_code", 0) == 200:
         try:
             i_json = _response_json(i_res)
@@ -767,16 +792,28 @@ async def fetch_ticker(symbol):
             pre_p = pre_scan or meta.get("preMarketPrice") or safe(fq.get("preMarketPrice"))
             post_p = post_scan or meta.get("postMarketPrice") or safe(fq.get("postMarketPrice"))
             reg_p = regular_scan or meta.get("regularMarketPrice") or quote_price
+
             intraday_prev_close = meta.get("regularMarketPreviousClose") or 0.0
 
             closes_intraday = i_quote.get("close") or []
             if closes_intraday:
                 last_trade = safe(closes_intraday[-1], 0.0)
+
         except Exception:
             pass
 
     prev_c = quote_prev_close or intraday_prev_close or (closes[-1] if closes else 0.0)
-    current_price = _select_active_price(session_state, prev_c, pre_p, reg_p, post_p, last_trade, quote_price)
+
+    current_price = _select_active_price(
+        session_state,
+        prev_c,
+        pre_p,
+        reg_p,
+        post_p,
+        last_trade,
+        quote_price
+    )
+
     if current_price <= 0:
         current_price = quote_price or prev_c
 
@@ -785,52 +822,63 @@ async def fetch_ticker(symbol):
     reg_change_open = reg_p - open_price if open_price > 0 else 0.0
     reg_pct_open = (reg_change_open / open_price * 100) if open_price > 0 else 0.0
 
-    clean_sym = actual_symbol.split('.')[0].replace("=X", "").replace("=F", "")
+    # -------------------------
+    # BASIC METRICS
+    # -------------------------
+    day_high = safe(fq.get("regularMarketDayHigh", 0.0))
+    day_low = safe(fq.get("regularMarketDayLow", 0.0))
+    high52 = safe(fq.get("fiftyTwoWeekHigh", 0.0))
+    low52 = safe(fq.get("fiftyTwoWeekLow", 0.0))
+    market_cap = safe(fq.get("marketCap", 0.0))
+    pe = fq.get("trailingPE", "N/A")
+    eps = fq.get("epsTrailingTwelveMonths", "N/A")
+    consensus = fq.get("averageAnalystRating", "N/A")
+    next_earnings = fq.get("earningsTimestamp", "N/A")
 
-   
-# --- fallback danych fundamentalnych / z metadanych ---
-meta = {}
+    # -------------------------
+    # FINNHUB FALLBACK METRICS
+    # -------------------------
+    if (
+        (market_cap <= 0 or pe == "N/A" or eps == "N/A")
+        and not raw_symbol.startswith("^")
+        and "F" not in actual_symbol
+    ):
+        metric_url = finnhub_url(
+            "stock/metric",
+            {"symbol": clean_sym, "metric": "all"}
+        )
 
-if not fq and payload:
-    meta = _chart_meta_fallback(payload)
+        f_metric = await fetch_json_cached(metric_url, ttl=180, cache_key=metric_url) or {}
 
-day_high = safe(fq.get("regularMarketDayHigh", 0.0)) or safe(meta.get("regularMarketDayHigh", 0.0))
-day_low = safe(fq.get("regularMarketDayLow", 0.0)) or safe(meta.get("regularMarketDayLow", 0.0))
-high52 = safe(fq.get("fiftyTwoWeekHigh", 0.0)) or safe(meta.get("fiftyTwoWeekHigh", 0.0))
-low52 = safe(fq.get("fiftyTwoWeekLow", 0.0)) or safe(meta.get("fiftyTwoWeekLow", 0.0))
-market_cap = safe(fq.get("marketCap", 0.0)) or safe(meta.get("marketCap", 0.0))
-pe = fq.get("trailingPE", "N/A")
-eps = fq.get("epsTrailingTwelveMonths", "N/A")
-consensus = fq.get("averageAnalystRating", "N/A")
-next_earnings = fq.get("earningsTimestamp", "N/A")
-clean_sym = actual_symbol.split('.')[0].replace("=X", "").replace("=F", "")
+        if f_metric:
+            metrics = f_metric.get("metric", {})
 
-if (market_cap <= 0 or pe == "N/A" or eps == "N/A") and not raw_symbol.startswith("^") and "F" not in actual_symbol:
-    metric_url = finnhub_url("stock/metric", {"symbol": clean_sym, "metric": "all"})
-    f_metric = await fetch_json_cached(metric_url, ttl=180)
+            if market_cap <= 0:
+                market_cap = safe(metrics.get("marketCapitalization")) * 1_000_000
+            if pe == "N/A" and metrics.get("peTTM") is not None:
+                pe = fmt_num(metrics.get("peTTM"))
+            if eps == "N/A" and metrics.get("epsTTM") is not None:
+                eps = fmt_num(metrics.get("epsTTM"))
+            if low52 == 0:
+                low52 = safe(metrics.get("52WeekLow"))
+            if high52 == 0:
+                high52 = safe(metrics.get("52WeekHigh"))
 
-    if f_metric:
-        metrics = f_metric.get("metric", {})
-        if market_cap <= 0:
-            market_cap = safe(metrics.get("marketCapitalization")) * 1_000_000
-        if pe == "N/A" and metrics.get("peTTM") is not None:
-            pe = fmt_num(metrics.get("peTTM"))
-        if eps == "N/A" and metrics.get("epsTTM") is not None:
-            eps = fmt_num(metrics.get("epsTTM"))
-        if low52 == 0:
-            low52 = safe(metrics.get("52WeekLow"))
-        if high52 == 0:
-            high52 = safe(metrics.get("52WeekHigh"))
-
+    # -------------------------
+    # RANGES
+    # -------------------------
     session_range = f"{fmt_num(day_low)} – {fmt_num(day_high)}" if day_low > 0 else "N/A"
     yearly_range = f"{fmt_num(low52)} – {fmt_num(high52)}" if low52 > 0 else "N/A"
 
+    # -------------------------
+    # RETURN
+    # -------------------------
     return {
         "symbol": actual_symbol,
         "display_symbol": raw_symbol,
         "name": normalize_company_name(
             raw_symbol,
-            fq.get("shortName") or fq.get("longName") or meta.get("shortName") or meta.get("longName"),
+            fq.get("shortName") or fq.get("longName"),
             display_name=CFD_FRIENDLY.get(raw_symbol)
         ),
         "session_state": session_state,
