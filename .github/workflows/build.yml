@@ -39,7 +39,7 @@ jobs:
 
       - name: Install pinned python-for-android
         run: |
-          pip install git+https://github.com/kivy/python-for-android@release-2023.09.16
+          pip install git+https://github.com/kivy/python-for-android@master
 
       - name: Upgrade pip
         run: |
