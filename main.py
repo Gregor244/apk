@@ -998,32 +998,65 @@ async def fetch_ticker(symbol):
     if regular_close <= 0:
         regular_close = prev_c
 
-    v10_stats = build_v10_stats(closes, volumes, current_price, prev_c, regular_close=regular_close)
+    v10_stats = build_v10_stats(
+        closes,
+        volumes,
+        current_price,
+        prev_c,
+        regular_close=regular_close
+    )
 
-day_high = safe(quote.get("regularMarketDayHigh", 0.0) or fh_quote.get("h", 0.0))
-day_low = safe(quote.get("regularMarketDayLow", 0.0) or fh_quote.get("l", 0.0))
+    day_high = safe(
+        fh_q.get("regularMarketDayHigh", 0.0)
+    )
 
-high52 = safe(quote.get("fiftyTwoWeekHigh", 0.0))
-low52 = safe(quote.get("fiftyTwoWeekLow", 0.0))
+    day_low = safe(
+        fh_q.get("regularMarketDayLow", 0.0)
+    )
 
-market_cap = safe(
-    quote.get("marketCap", 0.0)
-    or profile.get("marketCapitalization", 0.0)
+    high52 = safe(
+        fh_q.get("fiftyTwoWeekHigh", 0.0)
+    )
+
+    low52 = safe(
+        fh_q.get("fiftyTwoWeekLow", 0.0)
+    )
+
+    market_cap = safe(
+        fh_q.get("marketCap", 0.0)
+    )
+
+    pe = fh_q.get("trailingPE", "N/A")
+
+    eps = fh_q.get(
+        "epsTrailingTwelveMonths",
+        "N/A"
+    )
+
+    next_earnings = fh_q.get(
+        "earningsTimestamp",
+        "N/A"
+    )
+
+    analyst_rating = fh_q.get(
+        "recommendationKey",
+        "Brak"
+    )
+
+    name = (
+        fh_q.get("shortName")
+        or fh_q.get("longName")
+        or raw_symbol
 )
 
-pe = quote.get("trailingPE", "N/A")
-eps = quote.get("epsTrailingTwelveMonths", "N/A")
-
-next_earnings = quote.get("earningsTimestamp", "N/A")
-analyst_rating = quote.get("recommendationKey", "Brak")
-
-    name = quote_root.get("shortName") or quote_root.get("longName") or profile.get("name") or profile.get("ticker") or raw_symbol
-    name = normalize_company_name(actual_symbol, name, display_name=friendly if friendly and not friendly.startswith("^") else None)
-
 async def fetch_ticker(symbol):
-    raw_symbol, actual_symbol = resolve_symbol(symbol)
-    if not actual_symbol:
+    raw_symbol = (symbol or "").strip().upper()
+
+    if not raw_symbol:
         return None
+
+    actual_symbol = raw_symbol
+    friendly = raw_symbol
 
     yahoo_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{actual_symbol}?interval=1d&range=1y"
     intraday_url = f"https://query2.finance.yahoo.com/v8/finance/chart/{actual_symbol}?interval=1m&range=1d&includePrePost=true"
@@ -1421,7 +1454,7 @@ class ScannerTab(BaseTab):
             self.static_tickers.remove(t)
             self.refresh_data(mode="core")
 
-    async def _fetch(self, mode="core", **kwargs):
+async def _fetch(self, mode="core", **kwargs):
     if mode == "gainers":
         all_tickers = (await fetch_top_gainers_by_type_async("day_gainers"))[:20]
     else:
