@@ -12,6 +12,7 @@ icon.filename = %(source.dir)s/icon.png
 version = 10.0
 
 requirements = hostpython3==3.10.14,python3==3.10.14,kivy==2.2.1,kivymd==1.1.1,httpx,websockets,certifi,pyjnius,plyer
+
 cython_version=0.29.36
 orientation = portrait
 fullscreen = 0
@@ -24,7 +25,7 @@ android.ndk = 25b
 android.bootstrap = sdl2
 android.build_tools_version = 34.0.0
 
-p4a.branch= master
+p4a.branch = release-2023.09.16
 android.archs = arm64-v8a
 p4a.python_version=3.10
 
