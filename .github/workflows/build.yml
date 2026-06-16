@@ -1,101 +1,55 @@
-name: Build StockScannerPro APK
+name: Build StockScannerV10 APK
 
 on:
   workflow_dispatch:
 
-env:
-  BUILDOZER_WARN_ON_ROOT: "0"
-
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.10'
 
-      - name: Set up Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      
-      - name: Install system dependencies
+      - name: Install system deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libffi-dev libssl-dev \
-            python3-dev python3-pip zip unzip \
-            zlib1g-dev cmake libltdl-dev libsqlite3-dev \
-            openjdk-17-jdk zlib1g-dev cmake \
-            libltdl-dev libsqlite3-dev \
-            gettext autopoint
+          sudo apt update
+          sudo apt install -y zip unzip git wget curl \
+            build-essential autoconf automake libtool pkg-config \
+            libffi-dev libssl-dev zlib1g-dev cmake openjdk-17-jdk
 
-      - name: Prepare Patched p4a
-        run: |
-          pip uninstall -y cython
-          pip install cython==0.29.36
-          python -m pip install --upgrade pip
-          git clone https://github.com/kivy/python-for-android.git p4a-custom
-          rm -rf p4a-custom/pythonforandroid/recipes/libthorvg
-          mkdir -p p4a-custom/pythonforandroid/recipes/libthorvg
-          printf "from pythonforandroid.recipe import Recipe\n\nclass LibthorvgRecipe(Recipe):\n    name = 'libthorvg'\n    version = '0.12.0'\n    def get_include_dir(self, arch):\n        return \"\"\n    def build_arch(self, arch):\n        pass\n\nrecipe = LibthorvgRecipe()" > p4a-custom/pythonforandroid/recipes/libthorvg/__init__.py
-          find p4a-custom -type f -name "*.py" -exec sed -i "s/install -U pip/install 'pip<24.0'/g" {} +
-          find p4a-custom -type f -name "*.py" -exec sed -i "s/install --upgrade pip/install 'pip<24.0'/g" {} +
-          sed -i '/p4a.source_dir/d' buildozer.spec
-          sed -i '/p4a.branch/d' buildozer.spec
-          sed -i '/^\[app\]/a p4a.source_dir = '"$(pwd)"'/p4a-custom' buildozer.spec
-          echo "pip<24.0" > /tmp/pip-constraint.txt
-          sed -i 's/version = "3.14.0"/version = "3.11.9"/g' \
-          p4a-custom/pythonforandroid/recipes/python3/__init__.py
-
-      - name: Full clean build cache
-        run: |
-            rm -rf .buildozer
-            rm -rf bin
-            rm -rf ~/.buildozer
-            rm -rf ~/.gradle/caches
-            rm -rf ~/.local/share/python-for-android
-            rm -rf /home/runner/work/apk/apk/.buildozer
-            rm -rf /home/runner/.buildozer
-            rm -rf /home/runner/.python-for-android
-
-    
-      - name: Clean caches
+      - name: HARD CLEAN (important)
         run: |
           rm -rf .buildozer
-          rm -rf bin
           rm -rf ~/.buildozer
+          rm -rf ~/.python-for-android
           rm -rf ~/.gradle/caches
-          rm -rf ~/.local/share/python-for-android
 
       - name: Upgrade pip
         run: |
           python -m pip install --upgrade pip setuptools wheel
 
-      - name: Install Buildozer
+      - name: Install Buildozer stack
         run: |
-         rm -rf .buildozer/android/platform/build-arm64-v8a_armeabi-v7a/dists/stockscannerpro/.gradle
-         pip install --upgrade pip setuptools wheel
-         pip install cython==0.29.36
-         pip install buildozer==1.4.0
-         pip install virtualenv
-         buildozer --version
+          pip install cython==0.29.36
+          pip install buildozer==1.5.0 virtualenv
 
-
-      - name: Clean and build APK
-        run: |
-          buildozer android debug
+      - name: Build APK
+        run: buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: StockScannerPro-APK
+          name: StockScannerV10-APK
           path: bin/*.apk
-          if-no-files-found: error
