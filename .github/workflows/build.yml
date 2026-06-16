@@ -35,6 +35,11 @@ jobs:
           rm -rf ~/.buildozer
           rm -rf ~/.python-for-android
           rm -rf ~/.gradle/caches
+          rm -rf ~/.cache 
+
+          - name: Install pinned python-for-android
+         run: |
+          pip install git+https://github.com/kivy/python-for-android@release-2023.09.16
 
       - name: Upgrade pip
         run: |
@@ -44,7 +49,14 @@ jobs:
         run: |
           pip install cython==0.29.36
           pip install buildozer==1.5.0 virtualenv
+       
+      - name: Force stable p4a environment
+        run: |
+         echo "P4A_PYTHON_VERSION=3.10" >> $GITHUB_ENV
+         echo "P4A_BRANCH=release-2023.09.16" >> $GITHUB_ENV
+         echo "BUILD_ZEUG=1" >> $GITHUB_ENV
 
+    
       - name: Build APK
         run: buildozer android debug
 
