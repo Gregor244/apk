@@ -29,6 +29,7 @@ from kivy.lang import Builder
 from kivy.metrics import dp
 from kivy.properties import StringProperty
 from kivy.uix.recycleview import RecycleView
+from kivy.uix.scrollview import ScrollView
 from kivymd.app import MDApp
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDRaisedButton
@@ -444,6 +445,7 @@ def build_v10_stats(closes, current_price, prev_close, pre_price=0.0, post_price
 # =========================================
 # V4 WEBSOCKET ENGINE (REAL-TIME DATA)
 # =========================================
+
 class LiveTickStreamV4:
     def __init__(self, ws_url):
         self.ws_url = ws_url
@@ -451,6 +453,9 @@ class LiveTickStreamV4:
         self.running = False
         self.tick_buffer = deque(maxlen=5000)
         self.symbols_to_track = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD"]
+        self.current_symbols = set()
+        self.ws = None
+        self._symbols_lock = asyncio.Lock()
 
     def subscribe(self, callback):
         self.subscribers.append(callback)
@@ -463,19 +468,47 @@ class LiveTickStreamV4:
             except Exception as e:
                 print("[WS callback error]", e)
 
+    async def sync_symbols(self, new_symbols):
+        cleaned = [s.strip().upper() for s in (new_symbols or []) if s and s.strip()]
+        cleaned = list(dict.fromkeys(cleaned))
+        async with self._symbols_lock:
+            old = set(self.current_symbols)
+            new = set(cleaned)
+            self.symbols_to_track = cleaned
+            if self.ws is None or not self.running:
+                self.current_symbols = set(cleaned)
+                return
+            to_unsub = old - new
+            to_sub = new - old
+            for sym in sorted(to_unsub):
+                try:
+                    await self.ws.send(json.dumps({"type": "unsubscribe", "symbol": sym}))
+                except Exception:
+                    pass
+            for sym in sorted(to_sub):
+                try:
+                    await self.ws.send(json.dumps({"type": "subscribe", "symbol": sym}))
+                except Exception:
+                    pass
+            self.current_symbols = set(cleaned)
+
     async def connect(self):
         self.running = True
         retry_count = 0
         while self.running:
             try:
                 async with websockets.connect(f"wss://ws.finnhub.io?token={FINNHUB_KEY}") as ws:
+                    self.ws = ws
                     print("[V4 WS] Połączono")
                     retry_count = 0
-                    
-                    # Wysłanie subskrypcji do Finnhub
-                    for sym in self.symbols_to_track:
+
+                    async with self._symbols_lock:
+                        initial = list(self.symbols_to_track)
+                        self.current_symbols = set(initial)
+
+                    for sym in initial:
                         await ws.send(json.dumps({"type": "subscribe", "symbol": sym}))
-                        
+
                     async for msg in ws:
                         response = json.loads(msg)
                         if response.get("type") == "ping":
@@ -494,11 +527,14 @@ class LiveTickStreamV4:
                 wait_time = min(2 ** retry_count, 60)
                 print(f"[WS reconnect] {e} - ponawianie za {wait_time}s")
                 await asyncio.sleep(wait_time)
+            finally:
+                self.ws = None
 
     def stop(self):
         self.running = False
 
 class RealTimeAIv4:
+
     def __init__(self):
         self.prices = {}
 
@@ -530,6 +566,7 @@ class RealTimeAIv4:
             "hist": hist, "score": score, "signal": signal, "momentum": momentum
         }
 
+
 class UltraEngineV4:
     def __init__(self, ws_url):
         self.stream = LiveTickStreamV4(ws_url)
@@ -543,17 +580,24 @@ class UltraEngineV4:
 
     def on_tick(self, tick):
         result = self.ai.update(tick)
-        if not result: return
+        if not result:
+            return
         sym = result["symbol"]
         now = time.time()
-        if now - self.last_signals.get(sym, 0) < 2: return
+        if now - self.last_signals.get(sym, 0) < 2:
+            return
         self.last_signals[sym] = now
         for cb in self.listeners:
-            try: cb(result)
-            except Exception: pass
+            try:
+                cb(result)
+            except Exception:
+                pass
 
     async def start(self):
         await self.stream.connect()
+
+    async def update_symbols(self, symbols):
+        await self.stream.sync_symbols(symbols)
 
     def stop(self):
         self.stream.stop()
@@ -1271,6 +1315,221 @@ class ScannerTab(BaseTab):
 
         return rows
 
+
+class LiveDataTab(MDBoxLayout, MDTabsBase):
+    title = "Live data"
+
+    def __init__(self, **kw):
+        super().__init__(orientation="vertical", **kw)
+        self.tickers = list(dict.fromkeys(["AAPL", "MSFT", "NVDA", "TSLA", "AMD"]))
+        self.history = {sym: deque(maxlen=5) for sym in self.tickers}
+        self._lock = threading.Lock()
+
+        self.padding = [dp(10), dp(10), dp(10), dp(10)]
+        self.spacing = dp(10)
+
+        self.control_panel = MDBoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            height=dp(156),
+            padding=[dp(12), dp(12), dp(12), dp(12)],
+            spacing=dp(8),
+        )
+        self.add_widget(self.control_panel)
+
+        row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(52), spacing=dp(10))
+        self.live_input = MDTextField(hint_text="Dodaj / usuń ticker, np. TSLA", mode="rectangle")
+        row.add_widget(self.live_input)
+        row.add_widget(MDRaisedButton(text="+", size_hint_x=0.18, on_release=self.add_ticker))
+        row.add_widget(MDRaisedButton(text="-", size_hint_x=0.18, on_release=self.remove_ticker))
+        self.control_panel.add_widget(row)
+
+        btn_row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(40), spacing=dp(10))
+        btn_row.add_widget(MDRaisedButton(text="Odśwież panel", on_release=lambda x: self.refresh_view()))
+        btn_row.add_widget(MDRaisedButton(text="Reset domyślnych", on_release=self.reset_defaults))
+        self.control_panel.add_widget(btn_row)
+
+        self.status_label = MDLabel(
+            text="[color=#888888]Czekam na dane live...[/color]",
+            markup=True,
+            size_hint_y=None,
+            height=dp(24),
+            halign="left",
+            valign="middle",
+        )
+        self.status_label.bind(size=lambda *_: setattr(self.status_label, "text_size", (self.status_label.width, None)))
+        self.control_panel.add_widget(self.status_label)
+
+        self.scroll = ScrollView(do_scroll_x=False)
+        self.container = MDBoxLayout(
+            orientation="vertical",
+            size_hint_y=None,
+            spacing=dp(12),
+            padding=[dp(2), dp(2), dp(2), dp(14)],
+        )
+        self.container.bind(minimum_height=self.container.setter("height"))
+        self.scroll.add_widget(self.container)
+        self.add_widget(self.scroll)
+
+        self.refresh_view()
+        self._sync_engine_symbols()
+
+    def _normalize(self, symbol):
+        return (symbol or "").strip().upper()
+
+    def _sync_engine_symbols(self):
+        app = MDApp.get_running_app()
+        if app and getattr(app, "engine", None):
+            try:
+                run_coro(app.engine.update_symbols(self.tickers))
+            except Exception:
+                pass
+
+    def _ensure_ticker(self, symbol):
+        symbol = self._normalize(symbol)
+        if not symbol:
+            return None
+        with self._lock:
+            if symbol not in self.tickers:
+                self.tickers.append(symbol)
+            if symbol not in self.history:
+                self.history[symbol] = deque(maxlen=5)
+        return symbol
+
+    def add_ticker(self, *args):
+        symbol = self._ensure_ticker(self.live_input.text)
+        if symbol:
+            self.live_input.text = ""
+            self.status_label.text = f"[color=#00AA00]Dodano ticker: {symbol}[/color]"
+            self.refresh_view()
+            self._sync_engine_symbols()
+
+    def remove_ticker(self, *args):
+        symbol = self._normalize(self.live_input.text)
+        with self._lock:
+            if symbol in self.tickers:
+                self.tickers.remove(symbol)
+                self.history.pop(symbol, None)
+                self.status_label.text = f"[color=#FF0000]Usunięto ticker: {symbol}[/color]"
+                self.refresh_view()
+                self._sync_engine_symbols()
+            else:
+                self.status_label.text = "[color=#888888]Ticker nie jest na liście.[/color]"
+
+    def reset_defaults(self, *args):
+        with self._lock:
+            self.tickers = list(dict.fromkeys(["AAPL", "MSFT", "NVDA", "TSLA", "AMD"]))
+            self.history = {sym: deque(maxlen=5) for sym in self.tickers}
+        self.status_label.text = "[color=#888888]Przywrócono domyślne tickery.[/color]"
+        self.refresh_view()
+        self._sync_engine_symbols()
+
+    def add_live_entry(self, signal):
+        symbol = self._normalize(signal.get("symbol"))
+        if not symbol:
+            return
+        with self._lock:
+            if symbol not in self.tickers:
+                self.tickers.append(symbol)
+            if symbol not in self.history:
+                self.history[symbol] = deque(maxlen=5)
+            self.history[symbol].appendleft({
+                "ts": time.time(),
+                "price": safe(signal.get("price")),
+                "score": int(safe(signal.get("score"))),
+                "signal": signal.get("signal", "TRZYMAJ"),
+                "rsi": safe(signal.get("rsi")),
+                "macd": safe(signal.get("macd")),
+                "hist": safe(signal.get("hist")),
+                "momentum": safe(signal.get("momentum")),
+            })
+        self.status_label.text = f"[color=#00AA00]Ostatnia aktualizacja: {symbol}[/color]"
+        self.refresh_view()
+
+    def _entry_text(self, entry):
+        if not entry:
+            return "[color=#777777]Brak[/color]"
+        ts = datetime.fromtimestamp(entry["ts"]).strftime("%H:%M:%S")
+        signal = entry.get("signal", "TRZYMAJ")
+        sig_color = "#00AA00" if signal == "KUPUJ" else "#FF0000" if signal == "SPRZEDAJ" else "#888888"
+        return (
+            f"[b]{ts}[/b]\n"
+            f"{entry['price']:.2f}\n"
+            f"[color={sig_color}]{signal}[/color]\n"
+            f"Score {entry['score']}%"
+        )
+
+    def _build_ticker_card(self, symbol):
+        entries = list(self.history.get(symbol, deque(maxlen=5)))
+        while len(entries) < 5:
+            entries.append(None)
+
+        latest = entries[0]
+        subtitle = ""
+        if latest:
+            subtitle = f" | Cena: {latest['price']:.2f} | Score: {latest['score']}%"
+        card = MDCard(
+            orientation="vertical",
+            size_hint_y=None,
+            padding=[dp(14), dp(12), dp(14), dp(12)],
+            spacing=dp(10),
+            radius=[14, 14, 14, 14],
+            elevation=1,
+            md_bg_color=(1, 1, 1, 1),
+        )
+
+        title = MDLabel(
+            text=f"[b]{symbol}[/b]{subtitle}",
+            markup=True,
+            size_hint_y=None,
+            height=dp(26),
+            halign="left",
+            valign="middle",
+        )
+        title.bind(size=lambda inst, *_: setattr(inst, "text_size", (inst.width, None)))
+        card.add_widget(title)
+
+        row = MDBoxLayout(orientation="horizontal", size_hint_y=None, height=dp(96), spacing=dp(8))
+        for entry in entries[:5]:
+            mini = MDCard(
+                orientation="vertical",
+                size_hint_x=0.2,
+                padding=[dp(8), dp(8), dp(8), dp(8)],
+                radius=[10, 10, 10, 10],
+                elevation=0,
+                md_bg_color=(0.96, 0.96, 0.96, 1),
+            )
+            lbl = MDLabel(
+                text=self._entry_text(entry),
+                markup=True,
+                halign="center",
+                valign="middle",
+            )
+            lbl.bind(size=lambda inst, *_: setattr(inst, "text_size", (inst.width - dp(6), None)))
+            mini.add_widget(lbl)
+            row.add_widget(mini)
+
+        card.add_widget(row)
+        return card
+
+    def refresh_view(self):
+        def _ui(dt):
+            self.container.clear_widgets()
+            with self._lock:
+                tickers = list(self.tickers)
+            if not tickers:
+                self.container.add_widget(MDLabel(
+                    text="[color=#FF0000]Brak tickerów do wyświetlenia.[/color]",
+                    markup=True,
+                    size_hint_y=None,
+                    height=dp(28),
+                ))
+                return
+            for symbol in tickers:
+                self.container.add_widget(self._build_ticker_card(symbol))
+        Clock.schedule_once(_ui, 0)
+
+
 class TickerTab(BaseTab):
     title = "Ticker"
 
@@ -1724,28 +1983,25 @@ class StockScanner(MDApp):
             FirebaseMessaging.getInstance().getToken()
         except Exception: pass
 
-    def start_v4_engine(self):
-        self.engine = UltraEngineV4(ws_url=f"wss://ws.finnhub.io?token={FINNHUB_KEY}")
-        self.engine.subscribe(self.on_live_signal)
-        run_coro(self.engine.start())
 
-    def on_live_signal(self, signal):
-        sig_color = '#00AA00' if signal['signal'] == 'KUPUJ' else ('#FF0000' if signal['signal'] == 'SPRZEDAJ' else '#888888')
-        text = (
-            f"[b]🔥 LIVE WS V4: {signal['symbol']}[/b]\n"
-            f"Cena: {signal['price']:.2f}\n"
-            f"RSI: {signal['rsi']:.1f} | MACD: {signal['macd']:.3f}\n"
-            f"Score AI: [b]{signal['score']}[/b]\n"
-            f"Sygnał: [color={sig_color}]{signal['signal']}[/color]"
-        )
-        Clock.schedule_once(lambda dt: self.push_live_card(text))
+def start_v4_engine(self):
+    self.engine = UltraEngineV4(ws_url=f"wss://ws.finnhub.io?token={FINNHUB_KEY}")
+    self.engine.subscribe(self.on_live_signal)
+    run_coro(self.engine.start())
 
-    def push_live_card(self, text):
-        if hasattr(self, "scanner_tab") and self.scanner_tab:
-            self.scanner_tab.full_rows.insert(0, text)
-            self.scanner_tab.set_rows(self.scanner_tab.full_rows, scroll_top=True)
+def update_live_symbols(self, symbols):
+    if self.engine:
+        run_coro(self.engine.update_symbols(symbols))
 
-    def build(self):
+def on_live_signal(self, signal):
+    Clock.schedule_once(lambda dt: self.live_tab.add_live_entry(signal) if hasattr(self, "live_tab") and self.live_tab else None)
+
+def push_live_card(self, text):
+    if hasattr(self, "live_tab") and self.live_tab:
+        self.live_tab.status_label.text = text
+
+def build(self):
+
         self.theme_cls.primary_palette = "Teal"
         self.theme_cls.theme_style = "Light"
         self.request_android_permissions()
@@ -1770,14 +2026,17 @@ class StockScanner(MDApp):
         
         return screen
 
-    def on_start(self):
-        start_async_loop()
-        Clock.schedule_once(lambda dt: self.start_foreground_service(), 0.1)
-        Clock.schedule_once(lambda dt: self.init_firebase(), 0.2)
-        Clock.schedule_once(lambda dt: self.request_battery_optimization_exception(), 0.3)
-        Clock.schedule_once(lambda dt: self.info_tab.load_data_if_needed(), 0.5)
-        Clock.schedule_once(lambda dt: self.start_v4_engine(), 1.0)
-        self.tabs.bind(on_tab_switch=self.on_tab_switch)
+
+def on_start(self):
+    start_async_loop()
+    Clock.schedule_once(lambda dt: self.start_foreground_service(), 0.1)
+    Clock.schedule_once(lambda dt: self.init_firebase(), 0.2)
+    Clock.schedule_once(lambda dt: self.request_battery_optimization_exception(), 0.3)
+    Clock.schedule_once(lambda dt: self.info_tab.load_data_if_needed(), 0.5)
+    Clock.schedule_once(lambda dt: self.start_v4_engine(), 1.0)
+    self.tabs.bind(on_tab_switch=self.on_tab_switch)
+    Clock.schedule_once(lambda dt: self.update_live_symbols(getattr(self.live_tab, "tickers", [])), 1.2)
+
 
     def on_tab_switch(self, instance_tabs, instance_tab, instance_tab_label, tab_text):
         if hasattr(instance_tab, "load_data_if_needed"):
