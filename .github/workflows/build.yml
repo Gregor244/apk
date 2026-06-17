@@ -19,8 +19,6 @@ jobs:
       - name: Limit build threads
         run: |
           echo "MAKEFLAGS=-j1" >> $GITHUB_ENV
-          env: 
-             PIP_NO_BUILD_ISOLATION: 1
           
       - name: Setup Android NDK 25b
         run: |
