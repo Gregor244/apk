@@ -49,7 +49,7 @@ warn_on_root = 0
 # -----------------------
 # 🔥 FORCE STABLE p4a
 # -----------------------
-p4a.branch = release-2023.09.16
+p4a.branch = master
 p4a.python_version = 3.10
 
 # IMPORTANT: REMOVE custom fork
