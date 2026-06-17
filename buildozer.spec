@@ -14,7 +14,7 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = hostpython3==3.10.14,python3==3.10.14,kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,httpx,websockets,certifi,urllib3,chardet,idna
+requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,httpx,websockets,certifi,urllib3,chardet,idna
 
 cython_version = 0.29.36
 
