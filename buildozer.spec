@@ -14,7 +14,7 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,httpx,websockets
+requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,websockets
 
 cython_version = 0.29.34
 
@@ -49,7 +49,7 @@ warn_on_root = 0
 # -----------------------
 # 🔥 FORCE STABLE p4a
 # -----------------------
-p4a.branch = master
+p4a.branch = develop
 p4a.python_version = 3.10
 
 # IMPORTANT: REMOVE custom fork
