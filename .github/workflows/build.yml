@@ -70,10 +70,11 @@ jobs:
 
       - name: Install Buildozer
         run: |
-         pip install pip==23.2.1
-         pip install --no-build-isolation setuptools==65.7.0 wheel==0.38.4
-         pip install cython==0.29.33
-         pip install buildozer
+          pip install pip==23.2.1
+          pip install --no-build-isolation setuptools==65.7.0 wheel==0.38.4
+          pip install cython==0.29.33
+          pip install "python-for-android<2024"
+          pip install buildozer
 
       - name: Patch libffi autotools
         run: |
@@ -88,7 +89,7 @@ jobs:
       - name: Force stable p4a environment
         run: |
          echo "P4A_PYTHON_VERSION=3.10" >> $GITHUB_ENV
-         echo "P4A_BRANCH=stable" >> $GITHUB_ENV
+         echo "P4A_BRANCH=develop" >> $GITHUB_ENV
 
       - name: Build APK
         run: buildozer android debug
