@@ -15,6 +15,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          
+      - name: Setup Android NDK 25b
+        run: |
+          wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
+          unzip android-ndk-r25b-linux.zip
+          mv android-ndk-r25b $HOME/android-ndk
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$HOME/android-ndk" >> $GITHUB_ENV
+          echo "ANDROIDNDK=$HOME/android-ndk" >> $GITHUB_ENV
 
       - name: Setup Java
         uses: actions/setup-java@v4
