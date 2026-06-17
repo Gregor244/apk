@@ -16,16 +16,16 @@ version = 10.0
 # -----------------------
 requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,websockets
 
-cython_version = 0.29.34
+cython_version = 0.29.33
 
 orientation = portrait
 fullscreen = 0
 allow_rotation = 0
 log_level = 2
 
-android.api = 34
+android.api = 31
 android.minapi = 26
-android.ndk_api = 26
+android.ndk_api = 21
 android.ndk = 25b
 android.sdk = 34
 android.build_tools_version = 34.0.0
@@ -49,7 +49,7 @@ warn_on_root = 0
 # -----------------------
 # 🔥 FORCE STABLE p4a
 # -----------------------
-p4a.branch = develop
+p4a.branch = master
 p4a.python_version = 3.10
 p4a.extra_args = --disable-thorvg
 
