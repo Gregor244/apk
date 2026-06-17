@@ -70,11 +70,10 @@ jobs:
 
       - name: Install Buildozer
         run: |
-          pip install pip==23.2.1
-          pip install --no-build-isolation setuptools==65.7.0 wheel==0.38.4
-          pip install cython==0.29.33
-          pip install "python-for-android<2024"
-          pip install buildozer
+         python -m pip install --upgrade pip==23.2.1 setuptools==65.7.0 wheel==0.38.4
+         python -m pip install cython==0.29.33
+         python -m pip install "python-for-android<2024"
+         python -m pip install buildozer
 
       - name: Patch libffi autotools
         run: |
