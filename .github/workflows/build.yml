@@ -37,7 +37,7 @@ jobs:
           rm -rf ~/.gradle/caches
           rm -rf ~/.cache 
 
-       - name: Install Buildozer
+      - name: Install Buildozer
         run: |
           pip install --upgrade pip
           pip install buildozer
