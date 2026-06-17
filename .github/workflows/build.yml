@@ -68,8 +68,9 @@ jobs:
           # Clear out any existing android-sdk or ndk remnants
           sudo rm -rf /usr/local/lib/android/sdk/ndk/*
 
-      - name: Install Buildozer env:
-        PIP_NO_BUILD_ISOLATION: 1
+      - name: Install Buildozer
+        env:
+          PIP_NO_BUILD_ISOLATION: 1
         
         run: |
           python -m pip install
