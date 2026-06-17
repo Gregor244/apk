@@ -38,7 +38,7 @@ android.accept_sdk_license = True
 android.enable_androidx = True
 android.allow_backup = True
 
-android.archs = arm64-v8a,armeabi-v7a
+android.archs = arm64-v8a
 
 android.services = ScannerService:service.py
 
