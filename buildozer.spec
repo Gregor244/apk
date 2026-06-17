@@ -14,9 +14,9 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,httpx,websockets,certifi,urllib3,chardet,idna
+requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,httpx,websockets
 
-cython_version = 0.29.36
+cython_version = 0.29.34
 
 orientation = portrait
 fullscreen = 0
