@@ -29,13 +29,14 @@ jobs:
           build-essential autoconf automake libtool pkg-config \
           libffi-dev libssl-dev zlib1g-dev cmake openjdk-17-jdk
 
-      - name: HARD CLEAN (important)
+      - name: HARD CLEAN (robust)
         run: |
+          # Remove only the build directories
           rm -rf .buildozer
-          rm -rf ~/.buildozer
-          rm -rf ~/.python-for-android
-          rm -rf ~/.gradle/caches
-          rm -rf ~/.cache 
+          # Force remove potential hidden platform directories
+          sudo rm -rf ~/.buildozer
+          sudo rm -rf .python-for-android
+          # This ensures we don't have lingering locks
 
       - name: Install Buildozer
         run: |
