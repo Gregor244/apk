@@ -16,6 +16,10 @@ jobs:
         with:
           python-version: '3.10'
           
+      - name: Limit build threads
+        run: |
+          echo "MAKEFLAGS=-j1" >> $GITHUB_ENV
+          
       - name: Setup Android NDK 25b
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
