@@ -27,7 +27,6 @@ android.api = 31
 android.minapi = 26
 android.ndk_api = 21
 android.ndk = 25b
-android.sdk = 34
 android.build_tools_version = 34.0.0
 
 android.release_artifact = apk
@@ -53,6 +52,7 @@ p4a.python_version = 3.10
 p4a.extra_args = --disable-thorvg
 osx.python_version = 3
 p4a.branch = master
+p4a.bootstrap = sdl2
 
 
 # IMPORTANT: REMOVE custom fork
