@@ -49,8 +49,8 @@ warn_on_root = 0
 # -----------------------
 # 🔥 FORCE STABLE p4a
 # -----------------------
-p4a.branch = master
-p4a.python_version = 3.10
+p4a.branch = develop
+p4a.python_version = 3
 p4a.extra_args = --disable-thorvg
 
 # IMPORTANT: REMOVE custom fork
