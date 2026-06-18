@@ -39,14 +39,13 @@ jobs:
             build-essential \
             autoconf automake libtool pkg-config m4 \
             libffi-dev libssl-dev zlib1g-dev \
-            cmake
+            cmake \
+            libncurses5
 
       - name: Setup Android NDK 25b
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r25b-linux.zip
-
           unzip -q android-ndk-r25b-linux.zip
-
           mv android-ndk-r25b $HOME/android-ndk
 
           echo "ANDROID_NDK_HOME=$HOME/android-ndk" >> $GITHUB_ENV
@@ -57,18 +56,18 @@ jobs:
         run: |
           rm -rf .buildozer
           rm -rf ~/.buildozer
-          rm -rf ~/.gradle/caches
+          rm -rf ~/.gradle
           rm -rf ~/.cache/pip
           rm -rf ~/.python-for-android
 
-      - name: Install Buildozer stack
+      - name: Install stable Buildozer stack
         run: |
           python -m pip uninstall -y \
             buildozer \
             python-for-android \
             cython \
             setuptools \
-            wheel || true
+            wheel
 
           python -m pip install --upgrade pip==23.2.1
 
@@ -76,34 +75,16 @@ jobs:
             setuptools==65.7.0 \
             wheel==0.38.4 \
             cython==0.29.33 \
+            build==0.10.0 \
+            virtualenv==20.24.7 \
             appdirs==1.4.4 \
-            "build<1.0.0" \
-            "virtualenv<20.26"
+            buildozer==1.4.0
 
-          python -m pip install \
-            buildozer==1.5.0 \
-            python-for-android==2023.9.16 \
-            --no-build-isolation \
-            --no-use-pep517
-
-      - name: Force old Cython
+      - name: Verify environment
         run: |
-          python -m pip install "Cython<3"
-
-      - name: Recreate p4a directory
-        run: |
-          mkdir -p .buildozer/android/platform
-
-      - name: Fix python-for-android dependencies
-        run: |
-          python -m pip install appdirs==1.4.4
-          python -m pip install "cython<3"
-
-      - name: Verify installations
-        run: |
-          python -m pip show appdirs
-          python -m pip show Cython
-          python -m pip show python-for-android
+          python --version
+          pip --version
+          buildozer --version
 
       - name: Build APK
         run: |
