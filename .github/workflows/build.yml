@@ -60,25 +60,10 @@ jobs:
           rm -rf ~/.cache/pip
           rm -rf ~/.python-for-android
 
-      - name: Install stable Buildozer stack
+      - name: Install Buildozer stack
         run: |
-          python -m pip uninstall -y \
-            buildozer \
-            python-for-android \
-            cython \
-            setuptools \
-            wheel
-
           python -m pip install --upgrade pip==23.2.1
-
-          python -m pip install \
-            setuptools==65.7.0 \
-            wheel==0.38.4 \
-            cython==0.29.33 \
-            build==0.10.0 \
-            virtualenv==20.24.7 \
-            appdirs==1.4.4 \
-            buildozer==1.4.0
+          python -m pip install setuptools==65.7.0 wheel==0.38.4 appdirs==1.4.4 cython==0.29.33 buildozer==1.5.0
 
       - name: Verify environment
         run: |
