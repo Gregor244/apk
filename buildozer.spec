@@ -52,6 +52,7 @@ warn_on_root = 0
 p4a.python_version = 3.10
 p4a.extra_args = --disable-thorvg
 osx.python_version = 3
+p4a.branch = master
 
 
 # IMPORTANT: REMOVE custom fork
