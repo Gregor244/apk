@@ -5,35 +5,56 @@ package.name = stockscanner
 package.domain = org.gregor
 
 source.dir = .
-source.include_exts = py,kv,png,jpg,json,txt,xml
+source.include_exts = py,kv,png,jpg,json,txt,xml,java
+
+icon.filename = %(source.dir)s/icon.png
 
 version = 10.0
 
-requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.0,kivymd==1.2.0,pillow,requests,plyer,websockets
+# -----------------------
+# 🔥 CORE FIX (CRITICAL)
+# -----------------------
+requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,websockets
+
+cython_version = 0.29.33
 
 orientation = portrait
 fullscreen = 0
+allow_rotation = 0
+log_level = 2
 
-# Android
-android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
-android.api = 33
-android.minapi = 24
-android.ndk_api = 24
+android.api = 31
+android.minapi = 26
+android.ndk_api = 21
+android.ndk = 25b
+android.build_tools_version = 34.0.0
 
-android.accept_sdk_license = True
-android.enable_androidx = True
+android.release_artifact = apk
 
 android.permissions = INTERNET,POST_NOTIFICATIONS,FOREGROUND_SERVICE,FOREGROUND_SERVICE_DATA_SYNC,WAKE_LOCK,VIBRATE,RECEIVE_BOOT_COMPLETED,REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 
+android.accept_sdk_license = True
+android.enable_androidx = True
+android.allow_backup = True
+
 android.archs = arm64-v8a
 
-# Service
 android.services = ScannerService:service.py
 
-# Buildozer / p4a
-p4a.bootstrap = sdl2
-p4a.branch = develop
-p4a.extra_args = --disable-thorvg
+android.wakelock = True
 
-log_level = 2
 warn_on_root = 0
+
+# -----------------------
+# 🔥 FORCE STABLE p4a
+# -----------------------
+p4a.python_version = 3.10
+p4a.extra_args = --disable-thorvg
+osx.python_version = 3
+p4a.branch = master
+p4a.bootstrap = sdl2
+
+
+# IMPORTANT: REMOVE custom fork
+# p4a.url = (REMOVE THIS)
+# p4a.fork = (REMOVE THIS)
