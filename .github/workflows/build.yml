@@ -57,4 +57,10 @@ jobs:
 
       - name: Build APK
         run: |
+          # Unset pre-installed GitHub Actions NDK variables
+          unset ANDROID_NDK
+          unset ANDROID_NDK_HOME
+          unset ANDROID_NDK_LATEST_HOME
+          
+          # Run buildozer
           buildozer android debug
