@@ -7,9 +7,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    # Removed ANDROID_NDK_HOME so Buildozer downloads 25b automatically
     env:
       P4A_PYTHON_VERSION: "3.11"
-      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
 
     steps:
       - name: Checkout
@@ -29,7 +29,6 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt update
-
           sudo apt install -y \
             git zip unzip openjdk-17-jdk \
             python3-pip autoconf libtool \
@@ -48,25 +47,13 @@ jobs:
           rm -rf ~/.gradle
           rm -rf ~/.cache/pip
 
-      - name: Install Buildozer
+      - name: Install Buildozer and Dependencies
         run: |
-          pip install --upgrade pip
-          pip install \
-          cython==0.29.36 \
-          setuptools==69.5.1 \
-          wheel==0.43.0
-
+          # Upgraded to Cython 3.0.10
+          pip install cython==3.0.10 setuptools==69.5.1 wheel==0.43.0
           pip install buildozer==1.5.0
-
-          pip install \
-          https://github.com/kivy/python-for-android/archive/develop.zip
-      
-
-      - name: Clean caches
-        run: |
-          rm -rf .buildozer
-          rm -rf ~/.buildozer
-          rm -rf ~/.gradle
+          
+          # Removed the Kivy develop.zip override to use stable p4a
 
       - name: Build APK
         run: |
