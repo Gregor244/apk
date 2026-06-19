@@ -14,16 +14,16 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = kivy==2.2.1,kivymd==1.1.1,pillow,requests,plyer,websockets
+requirements = kivy==2.3.0,kivymd==1.1.1,pillow,requests,plyer,websockets
 
-cython_version = 0.29.33
+cython_version = 3.0.10
 
 orientation = portrait
 fullscreen = 0
 allow_rotation = 0
 log_level = 2
 
-android.api = 31
+android.api = 33
 android.minapi = 26
 android.ndk_api = 21
 android.ndk = 25b
@@ -51,7 +51,6 @@ warn_on_root = 0
 p4a.python_version = 3.10
 p4a.extra_args = --disable-thorvg
 osx.python_version = 3
-p4a.branch = master
 p4a.bootstrap = sdl2
 
 
