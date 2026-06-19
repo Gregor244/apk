@@ -34,6 +34,7 @@ android.services = ScannerService:service.py
 p4a.bootstrap = sdl2
 p4a.branch = develop
 p4a.extra_args = --disable-thorvg
+p4a.python_version = 3.11
 
 log_level = 2
 warn_on_root = 0
