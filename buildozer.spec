@@ -15,9 +15,9 @@ orientation = portrait
 fullscreen = 0
 
 # Android
+android.ndk_path = /usr/local/lib/android/sdk/ndk/27.3.13750724
 android.api = 33
 android.minapi = 24
-android.ndk = 25c
 android.ndk_api = 24
 
 android.accept_sdk_license = True
