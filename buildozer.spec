@@ -33,6 +33,7 @@ android.services = ScannerService:service.py
 # Buildozer / p4a
 p4a.bootstrap = sdl2
 p4a.branch = develop
+p4a.extra_args = --disable-thorvg
 
 log_level = 2
 warn_on_root = 0
