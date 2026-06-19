@@ -8,7 +8,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-     ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/25.2.9519653
+      P4A_PYTHON_VERSION: "3.11"
+      ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/27.3.13750724
 
     steps:
       - name: Checkout
