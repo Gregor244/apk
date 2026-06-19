@@ -52,16 +52,23 @@ jobs:
           pip install cython==3.0.10 setuptools==69.5.1 wheel==0.43.0
           pip install buildozer==1.5.0
 
-      # -----------------------
-      # 🔥 NEW STEP: NUKE PRE-INSTALLED NDK
-      # -----------------------
       - name: Nuke Default GitHub Actions NDKs
         run: |
           sudo rm -rf /usr/local/lib/android/sdk/ndk
           echo "Deleted default NDKs to force Buildozer fallback."
 
+      # -----------------------
+      # 🔥 NEW STEP: FORCE OVERWRITE THE SPEC FILE APIs
+      # -----------------------
+      - name: Patch buildozer.spec
+        run: |
+          sed -i 's/.*android.minapi.*/android.minapi = 27/' buildozer.spec
+          sed -i 's/.*android.ndk_api.*/android.ndk_api = 27/' buildozer.spec
+          
+          # Print the file to the Actions log to prove it changed
+          grep "api =" buildozer.spec
+
       - name: Build APK
-        # Explicitly clear the env vars at the GitHub step level just to be safe
         env:
           ANDROID_NDK_HOME: ""
           ANDROID_NDK_LATEST_HOME: ""
