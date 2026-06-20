@@ -14,7 +14,7 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = python3==3.11.9,cython==0.29.36,kivy==2.3.0,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
+requirements = python3==3.11.9,cython==0.29.36,kivy==2.2.11,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
 
 cython_version = 3.0.10
 
@@ -30,6 +30,7 @@ android.ndk_api = 26
 android.ndk = 25b
 android.build_tools_version = 34.0.0
 android.sdk = 34
+osx.python_version = 3
 
 android.release_artifact = apk
 
@@ -50,9 +51,7 @@ warn_on_root = 0
 # -----------------------
 # 🔥 FORCE STABLE p4a
 # -----------------------
-p4a.python_version = 3.10
 p4a.extra_args = --disable-thorvg
-osx.python_version = 3
 p4a.bootstrap = sdl2
 # (str) python-for-android branch to use, defaults to master
 p4a.branch = stable
