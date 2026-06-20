@@ -14,7 +14,7 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = kivy==2.3.0,kivymd==1.1.1,pillow,requests,plyer,websockets
+requirements = python3==3.11.9,kivy==2.3.0,kivymd==1.1.1,cython==0.29.36,numpy,pandas,requests,yfinance,pytz,aiohttp
 
 cython_version = 3.0.10
 
@@ -23,11 +23,12 @@ fullscreen = 0
 allow_rotation = 0
 log_level = 2
 
-android.api = 33
-android.minapi = 26
+android.api = 34
+android.minapi = 24
 android.ndk_api = 26
 android.ndk = 25b
 android.build_tools_version = 34.0.0
+android.sdk = 34
 
 android.release_artifact = apk
 
@@ -53,7 +54,7 @@ p4a.extra_args = --disable-thorvg
 osx.python_version = 3
 p4a.bootstrap = sdl2
 # (str) python-for-android branch to use, defaults to master
-p4a.branch = develop
+p4a.branch = stable
 
 
 # IMPORTANT: REMOVE custom fork
