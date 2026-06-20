@@ -52,6 +52,8 @@ p4a.python_version = 3.10
 p4a.extra_args = --disable-thorvg
 osx.python_version = 3
 p4a.bootstrap = sdl2
+# (str) python-for-android branch to use, defaults to master
+p4a.branch = develop
 
 
 # IMPORTANT: REMOVE custom fork
