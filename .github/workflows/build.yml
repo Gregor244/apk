@@ -57,13 +57,21 @@ jobs:
           sudo rm -rf /usr/local/lib/android/sdk/ndk
           echo "Deleted default NDKs to force Buildozer fallback."
 
+            # -----------------------
+      # 🔥 UPDATED STEP: CLEAN & INJECT SPECS
+      # -----------------------
       - name: Force Buildozer Spec Updates
         run: |
-          # Append to the very bottom of the file to guarantee it overrides defaults
-          echo "" >> buildozer.spec
-          echo "android.minapi = 27" >> buildozer.spec
-          echo "android.ndk_api = 27" >> buildozer.spec
+          # 1. Delete ANY existing minapi or ndk_api lines so there are no duplicates
+          sed -i '/android\.minapi/d' buildozer.spec
+          sed -i '/android\.ndk_api/d' buildozer.spec
           
+          # 2. Safely inject the correct APIs immediately after the [app] header
+          sed -i '/^\[app\]/a android.minapi = 27\nandroid.ndk_api = 27' buildozer.spec
+          
+          # Print to verify
+          grep "api =" buildozer.spec
+
           # Print the last few lines to the log to prove it worked
           tail -n 5 buildozer.spec
 
