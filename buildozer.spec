@@ -22,6 +22,7 @@ orientation = portrait
 fullscreen = 0
 allow_rotation = 0
 log_level = 2
+environment = CYTHON_IGNORE_WARNINGS=1
 
 android.api = 34
 android.minapi = 24
