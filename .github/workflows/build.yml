@@ -39,6 +39,8 @@ jobs:
       - name: Upgrade pip
         run: |
           python -m pip install --upgrade pip setuptools wheel
+          de pip install cython==0.29.36
+    
 
       - name: Clean
         run: |
@@ -47,10 +49,13 @@ jobs:
           rm -rf ~/.gradle
           rm -rf ~/.cache/pip
 
+      
       - name: Install Buildozer and Dependencies
         run: |
           pip install cython==3.0.10 setuptools==69.5.1 wheel==0.43.0
           pip install buildozer==1.5.0
+          env:
+          P4A_RELEASE_KEYSTORE: ""
 
       - name: Nuke Default GitHub Actions NDKs
         run: |
