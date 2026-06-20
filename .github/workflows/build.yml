@@ -106,3 +106,13 @@ jobs:
           echo "LAST 30 LINES OF THE BUILD:"
           echo "=========================================="
           tail -n 30 build_log.txt
+          
+      - name: Upload logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-logs
+          path: |
+            build.log
+            .buildozer/**/*.log
+            .buildozer/**/*.txt
