@@ -14,7 +14,7 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = python3==3.11.9,kivy==2.3.0,kivymd==1.1.1,cython==0.29.36,numpy,pandas,requests,yfinance,pytz,aiohttp
+requirements = python3==3.11.9,cython==0.29.36,kivy==2.3.0,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
 
 cython_version = 3.0.10
 
@@ -55,7 +55,7 @@ osx.python_version = 3
 p4a.bootstrap = sdl2
 # (str) python-for-android branch to use, defaults to master
 p4a.branch = stable
-
+p4a.fork = kivy
 
 # IMPORTANT: REMOVE custom fork
 # p4a.url = (REMOVE THIS)
