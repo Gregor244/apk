@@ -18,8 +18,7 @@ PYTHON / KIVY
 
 ==================================================
 
-requirements = python3,kivy==2.2.1,kivymd==1.1.1,pillow,requests,aiohttp==3.9.5,websockets==12.0,pytz,plyer
-
+requirements = hostpython3==3.11.8,python3==3.11.8,kivy==2.3.0,kivymd==1.2.0,pillow,aiohttp==3.9.5,websockets==12.0,requests,plyer,certifi,urllib3,chardet,idna
 ==================================================
 
 ANDROID
@@ -58,7 +57,9 @@ P4A
 
 p4a.bootstrap = sdl2
 p4a.extra_args = --ignore-setup-py --debug
-
+# WAŻNE DLA STABILNOŚCI
+android.release_artifact = apk
+environment = LANG=en_US.UTF-8
 ==================================================
 
 LOGS
