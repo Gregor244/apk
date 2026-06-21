@@ -71,7 +71,8 @@ jobs:
 
           pip install \
             cython==0.29.36 \
-            buildozer==1.5.0
+            buildozer==1.4.0
+            python-for-android==2024.01.21
 
       # --------------------------------
       # REMOVE GITHUB NDK
