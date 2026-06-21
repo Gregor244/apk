@@ -1,28 +1,41 @@
 name: Build APK
 
 on:
- workflow_dispatch:
+workflow_dispatch:
 
 jobs:
- build:
-  runs-on: ubuntu-22.04
+build:
+runs-on: ubuntu-22.04
 
-  steps:
+steps:
+
   - name: Checkout
     uses: actions/checkout@v4
 
-  - name: Set up Python
+  # ==================================================
+  # PYTHON 3.11
+  # ==================================================
+
+  - name: Setup Python
     uses: actions/setup-python@v5
     with:
       python-version: "3.11"
 
-  - name: Set up Java
+  # ==================================================
+  # JAVA 17
+  # ==================================================
+
+  - name: Setup Java
     uses: actions/setup-java@v4
     with:
       distribution: temurin
       java-version: "17"
 
-  - name: Install system dependencies
+  # ==================================================
+  # SYSTEM PACKAGES
+  # ==================================================
+
+  - name: Install system packages
     run: |
       sudo apt update
 
@@ -44,6 +57,10 @@ jobs:
         build-essential \
         ccache
 
+  # ==================================================
+  # CLEAN
+  # ==================================================
+
   - name: Clean caches
     run: |
       rm -rf .buildozer
@@ -51,27 +68,43 @@ jobs:
       rm -rf ~/.gradle
       rm -rf ~/.cache/pip
 
-  - name: Install Python packages
+  # ==================================================
+  # INSTALL PYTHON DEPS
+  # ==================================================
+
+  - name: Install dependencies
     run: |
       python -m pip install --upgrade pip setuptools wheel
-      pip install cython==0.29.36
-      pip install buildozer==1.5.0
+
+      pip install \
+        cython==0.29.36 \
+        buildozer==1.4.0 \
+        python-for-android==2024.01.21
+
+  # ==================================================
+  # VERIFY
+  # ==================================================
+
+  - name: Show versions
+    run: |
+      python --version
+      buildozer --version
+      pip show python-for-android
+
+  # ==================================================
+  # BUILD APK
+  # ==================================================
 
   - name: Build APK
     run: |
       buildozer android debug
 
+  # ==================================================
+  # UPLOAD APK
+  # ==================================================
+
   - name: Upload APK
     uses: actions/upload-artifact@v4
     with:
-      name: stockscanner-apk
+      name: apk
       path: bin/*.apk
-
-  - name: Upload logs
-    if: always()
-    uses: actions/upload-artifact@v4
-    with:
-      name: build-logs
-      path: |
-        .buildozer/**/*.log
-        .buildozer/**/*.txt
