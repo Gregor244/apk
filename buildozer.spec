@@ -1,7 +1,6 @@
 [app]
 
 title = StockScannerV10
-package.name = stockscanner
 package.domain = org.gregor
 
 source.dir = 
