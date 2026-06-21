@@ -57,7 +57,7 @@ android.services = ScannerService:service.py
 # PYTHON FOR ANDROID
 # --------------------------------
 p4a.bootstrap = sdl2
-
+p4a.branch = master
 p4a.extra_args = --disable-thorvg
 
 # --------------------------------
