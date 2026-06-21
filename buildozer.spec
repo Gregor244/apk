@@ -12,16 +12,14 @@ icon.filename = %(source.dir)s/icon.png
 version = 10.0
 
 # --------------------------------
-# STABLE REQUIREMENTS
+# REQUIREMENTS
 # --------------------------------
 requirements = python3==3.11.9,cython==0.29.36,kivy==2.2.1,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
-
-# REMOVE THIS:
-# cython_version = 3.0.10
 
 orientation = portrait
 fullscreen = 0
 allow_rotation = 0
+
 log_level = 2
 
 environment = CYTHON_IGNORE_WARNINGS=1
@@ -32,8 +30,9 @@ environment = CYTHON_IGNORE_WARNINGS=1
 android.api = 34
 android.minapi = 27
 android.ndk_api = 27
-android.ndk = 25b
+
 android.sdk = 34
+android.ndk = 25b
 
 android.release_artifact = apk
 
@@ -45,20 +44,19 @@ android.allow_backup = True
 
 android.archs = arm64-v8a
 
-android.services = ScannerService:service.py
-
 android.wakelock = True
 
 warn_on_root = 0
 
 # --------------------------------
+# SERVICES
+# --------------------------------
+android.services = ScannerService:service.py
+
+# --------------------------------
 # PYTHON FOR ANDROID
 # --------------------------------
 p4a.bootstrap = sdl2
-
-# REMOVE:
-# p4a.branch = stable
-# p4a.fork = kivy
 
 p4a.extra_args = --disable-thorvg
 
@@ -66,4 +64,5 @@ p4a.extra_args = --disable-thorvg
 # PERFORMANCE
 # --------------------------------
 android.copy_libs = 1
+
 android.numeric_version = 100000
