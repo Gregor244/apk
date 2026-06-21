@@ -71,7 +71,7 @@ jobs:
 
           pip install \
             cython==0.29.36 \
-            buildozer==1.5.0
+            buildozer
 
       # -----------------------------
       # REMOVE BROKEN NDKS
@@ -97,8 +97,6 @@ jobs:
           ANDROID_NDK: ""
         run: |
           set -o pipefail
-
-          buildozer android clean
 
           buildozer android debug 2>&1 | tee build_log.txt
 
