@@ -58,7 +58,6 @@ P4A
 p4a.bootstrap = sdl2
 p4a.extra_args = --ignore-setup-py --debug
 # WAŻNE DLA STABILNOŚCI
-android.release_artifact = apk
 environment = LANG=en_US.UTF-8
 ==================================================
 
