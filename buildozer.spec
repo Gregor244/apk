@@ -11,19 +11,8 @@ icon.filename = %(source.dir)s/icon.png
 
 version = 10.0
 
-requirements = \
-    python3, \
-    kivy==2.2.1, \
-    kivymd==1.1.1, \
-    numpy==1.26.4, \
-    pandas==2.2.2, \
-    pillow, \
-    requests, \
-    aiohttp, \
-    websockets, \
-    yfinance, \
-    pytz, \
-    plyer
+
+requirements = python3,kivy==2.2.1,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
 
 orientation = portrait
 fullscreen = 0
