@@ -14,26 +14,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # -----------------------------
+      # --------------------------------
       # PYTHON 3.11
-      # -----------------------------
+      # --------------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # -----------------------------
+      # --------------------------------
       # JAVA 17
-      # -----------------------------
+      # --------------------------------
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # -----------------------------
+      # --------------------------------
       # SYSTEM DEPS
-      # -----------------------------
+      # --------------------------------
       - name: Install system dependencies
         run: |
           sudo apt update
@@ -52,9 +52,9 @@ jobs:
             build-essential \
             ccache
 
-      # -----------------------------
-      # CLEAN ALL CACHES
-      # -----------------------------
+      # --------------------------------
+      # CLEAN EVERYTHING
+      # --------------------------------
       - name: Clean caches
         run: |
           rm -rf .buildozer
@@ -62,34 +62,34 @@ jobs:
           rm -rf ~/.gradle
           rm -rf ~/.cache/pip
 
-      # -----------------------------
-      # PYTHON DEPS
-      # -----------------------------
+      # --------------------------------
+      # PYTHON TOOLS
+      # --------------------------------
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
 
           pip install \
             cython==0.29.36 \
-            buildozer
+            buildozer==1.5.0
 
-      # -----------------------------
-      # REMOVE BROKEN NDKS
-      # -----------------------------
-      - name: Remove GitHub Android NDK
+      # --------------------------------
+      # REMOVE GITHUB NDK
+      # --------------------------------
+      - name: Remove broken GitHub NDK
         run: |
           sudo rm -rf /usr/local/lib/android/sdk/ndk || true
 
-      # -----------------------------
+      # --------------------------------
       # VERIFY SPEC
-      # -----------------------------
+      # --------------------------------
       - name: Verify buildozer.spec
         run: |
           cat buildozer.spec
 
-      # -----------------------------
+      # --------------------------------
       # BUILD APK
-      # -----------------------------
+      # --------------------------------
       - name: Build APK
         env:
           ANDROID_NDK_HOME: ""
@@ -100,9 +100,9 @@ jobs:
 
           buildozer android debug 2>&1 | tee build_log.txt
 
-      # -----------------------------
+      # --------------------------------
       # ERROR EXTRACTOR
-      # -----------------------------
+      # --------------------------------
       - name: Extract errors
         if: failure()
         run: |
@@ -115,9 +115,9 @@ jobs:
           echo "========== LAST 100 LINES =========="
           tail -n 100 build_log.txt || true
 
-      # -----------------------------
+      # --------------------------------
       # UPLOAD LOGS
-      # -----------------------------
+      # --------------------------------
       - name: Upload logs
         uses: actions/upload-artifact@v4
         if: always()
