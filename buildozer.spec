@@ -14,7 +14,7 @@ version = 10.0
 # -----------------------
 # 🔥 CORE FIX (CRITICAL)
 # -----------------------
-requirements = python3==3.11.9,cython==0.29.36,kivy==2.2.11,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
+requirements = python3==3.11.9,cython==0.29.36,kivy==2.2.1,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
 
 cython_version = 3.0.10
 
