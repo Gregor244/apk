@@ -5,19 +5,14 @@ package.name = stockscanner
 package.domain = org.gregor
 
 source.dir = .
-source.include_exts = py,kv,png,jpg,json,txt,xml
+source.include_exts = py,kv,png,jpg,json,txt,xml,java
+
+icon.filename = %(source.dir)s/icon.png
 
 version = 10.0
 
-orientation = portrait
-fullscreen = 0
-
-#
-# STABILNE REQUIREMENTS
-#
 requirements = \
-    python3==3.11.0, \
-    cython==0.29.36, \
+    python3, \
     kivy==2.2.1, \
     kivymd==1.1.1, \
     numpy==1.26.4, \
@@ -30,37 +25,27 @@ requirements = \
     pytz, \
     plyer
 
-#
-# ANDROID
-#
+orientation = portrait
+fullscreen = 0
+allow_rotation = 0
+
 android.api = 34
 android.minapi = 24
-android.ndk_api = 24
-android.sdk = 34
+android.ndk_api = 26
 android.ndk = 25b
-android.accept_sdk_license = True
+android.sdk = 34
 
-android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE
+android.accept_sdk_license = True
+android.enable_androidx = True
+
+android.permissions = INTERNET,WAKE_LOCK,VIBRATE,FOREGROUND_SERVICE
 
 android.archs = arm64-v8a
 
-#
-# P4A
-#
-p4a.bootstrap = sdl2
-
-#
-# USUŃ CAŁKOWICIE:
-# p4a.branch
-# p4a.fork
-# p4a.url
-# cython_version
-#
-
-#
-# BUILD
-#
 android.release_artifact = apk
+
+p4a.bootstrap = sdl2
+p4a.extra_args = --ignore-setup-py --debug --disable-thorvg
 
 log_level = 2
 warn_on_root = 0
