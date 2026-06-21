@@ -11,26 +11,29 @@ icon.filename = %(source.dir)s/icon.png
 
 version = 10.0
 
-# -----------------------
-# 🔥 CORE FIX (CRITICAL)
-# -----------------------
+# --------------------------------
+# STABLE REQUIREMENTS
+# --------------------------------
 requirements = python3==3.11.9,cython==0.29.36,kivy==2.2.1,kivymd==1.1.1,numpy==1.26.4,pandas==2.2.2,pillow,requests,aiohttp,websockets,yfinance,pytz,plyer
 
-cython_version = 3.0.10
+# REMOVE THIS:
+# cython_version = 3.0.10
 
 orientation = portrait
 fullscreen = 0
 allow_rotation = 0
 log_level = 2
+
 environment = CYTHON_IGNORE_WARNINGS=1
 
+# --------------------------------
+# ANDROID
+# --------------------------------
 android.api = 34
-android.minapi = 24
-android.ndk_api = 26
+android.minapi = 27
+android.ndk_api = 27
 android.ndk = 25b
-android.build_tools_version = 34.0.0
 android.sdk = 34
-osx.python_version = 3
 
 android.release_artifact = apk
 
@@ -48,15 +51,19 @@ android.wakelock = True
 
 warn_on_root = 0
 
-# -----------------------
-# 🔥 FORCE STABLE p4a
-# -----------------------
-p4a.extra_args = --disable-thorvg
+# --------------------------------
+# PYTHON FOR ANDROID
+# --------------------------------
 p4a.bootstrap = sdl2
-# (str) python-for-android branch to use, defaults to master
-p4a.branch = stable
-p4a.fork = kivy
 
-# IMPORTANT: REMOVE custom fork
-# p4a.url = (REMOVE THIS)
-# p4a.fork = (REMOVE THIS)
+# REMOVE:
+# p4a.branch = stable
+# p4a.fork = kivy
+
+p4a.extra_args = --disable-thorvg
+
+# --------------------------------
+# PERFORMANCE
+# --------------------------------
+android.copy_libs = 1
+android.numeric_version = 100000
