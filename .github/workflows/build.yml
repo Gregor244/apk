@@ -7,7 +7,6 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
-    # Removed ANDROID_NDK_HOME so Buildozer downloads 25b automatically
     env:
       P4A_PYTHON_VERSION: "3.11"
 
@@ -15,109 +14,118 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # -----------------------------
+      # PYTHON 3.11
+      # -----------------------------
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # -----------------------------
+      # JAVA 17
+      # -----------------------------
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
+      # -----------------------------
+      # SYSTEM DEPS
+      # -----------------------------
       - name: Install system dependencies
         run: |
           sudo apt update
+
           sudo apt install -y \
-            git zip unzip openjdk-17-jdk \
-            python3-pip autoconf libtool \
-            pkg-config zlib1g-dev \
-            libncurses5-dev libncursesw5-dev \
-            cmake libffi-dev libssl-dev
+            git zip unzip \
+            openjdk-17-jdk \
+            autoconf automake libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            build-essential \
+            ccache
 
-      - name: Upgrade pip
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          de pip install cython==0.29.36
-    
-
-      - name: Clean
+      # -----------------------------
+      # CLEAN ALL CACHES
+      # -----------------------------
+      - name: Clean caches
         run: |
           rm -rf .buildozer
           rm -rf ~/.buildozer
           rm -rf ~/.gradle
           rm -rf ~/.cache/pip
 
-      
-      - name: Install Buildozer and Dependencies
+      # -----------------------------
+      # PYTHON DEPS
+      # -----------------------------
+      - name: Install Python dependencies
         run: |
-          pip install cython==3.0.10 setuptools==69.5.1 wheel==0.43.0
-          pip install buildozer==1.5.0
-          env:
-          P4A_RELEASE_KEYSTORE: ""
+          python -m pip install --upgrade pip setuptools wheel
 
-      - name: Nuke Default GitHub Actions NDKs
+          pip install \
+            cython==0.29.36 \
+            buildozer==1.5.0
+
+      # -----------------------------
+      # REMOVE BROKEN NDKS
+      # -----------------------------
+      - name: Remove GitHub Android NDK
         run: |
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          echo "Deleted default NDKs to force Buildozer fallback."
+          sudo rm -rf /usr/local/lib/android/sdk/ndk || true
 
-            # -----------------------
-      # 🔥 UPDATED STEP: CLEAN & INJECT SPECS
-      # -----------------------
-      - name: Force Buildozer Spec Updates
+      # -----------------------------
+      # VERIFY SPEC
+      # -----------------------------
+      - name: Verify buildozer.spec
         run: |
-          sed -i '/android\.minapi/d' buildozer.spec
-          sed -i '/android\.ndk_api/d' buildozer.spec
-          sed -i '/^\[app\]/a android.minapi = 27\nandroid.ndk_api = 27' buildozer.spec
-          grep "api =" buildozer.spec
+          cat buildozer.spec
 
-      # -----------------------
-      # 🔥 NEW STEP: THE SLEDGEHAMMER
-      # -----------------------
-      - name: Nuke Corrupted Cache
-        run: |
-          # This deletes everything. No more corrupted caches, no more missing files.
-          rm -rf .buildozer
-
+      # -----------------------------
+      # BUILD APK
+      # -----------------------------
       - name: Build APK
         env:
           ANDROID_NDK_HOME: ""
           ANDROID_NDK_LATEST_HOME: ""
           ANDROID_NDK: ""
         run: |
-          # The 'pipefail' ensures if buildozer crashes, the step still registers as failed
           set -o pipefail
-          
-          # 'tee' outputs to the screen normally, but ALSO saves a copy to build_log.txt
+
+          buildozer android clean
+
           buildozer android debug 2>&1 | tee build_log.txt
 
-      # -----------------------
-      # 🔥 NEW STEP: THE ERROR HUNTER
-      # -----------------------
-      - name: Extract Error on Failure
+      # -----------------------------
+      # ERROR EXTRACTOR
+      # -----------------------------
+      - name: Extract errors
         if: failure()
         run: |
-          echo "=========================================="
-          echo "🚨 ISOLATED ERROR LOG 🚨"
-          echo "=========================================="
-          # Search for Python crashes
-          grep -i -B 2 -A 20 "Traceback" build_log.txt || true
-          
-          # Search for Package compilation failures
-          grep -i -B 2 -A 20 "Recipe failed:" build_log.txt || true
-          
-          echo "=========================================="
-          echo "LAST 30 LINES OF THE BUILD:"
-          echo "=========================================="
-          tail -n 30 build_log.txt
-          
+          echo "========== TRACEBACK =========="
+          grep -i -B 5 -A 20 "Traceback" build_log.txt || true
+
+          echo "========== RECIPE FAILED =========="
+          grep -i -B 5 -A 20 "Recipe failed" build_log.txt || true
+
+          echo "========== LAST 100 LINES =========="
+          tail -n 100 build_log.txt || true
+
+      # -----------------------------
+      # UPLOAD LOGS
+      # -----------------------------
       - name: Upload logs
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: build-logs
           path: |
-            build.log
+            build_log.txt
             .buildozer/**/*.log
             .buildozer/**/*.txt
