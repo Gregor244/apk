@@ -4,7 +4,7 @@ title = StockScannerV10
 package.name = stockscanner
 package.domain = org.gregor
 
-source.dir = 
+source.dir = .
 source.include_exts = py,kv,png,jpg,json,txt,xml
 
 version = 10.0
