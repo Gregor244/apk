@@ -2939,7 +2939,14 @@ class LiveDataTab(MDBoxLayout, MDTabsBase):
         self.status_label.bind(size=lambda *_: setattr(self.status_label, "text_size", (self.status_label.width, None)))
         self.control_panel.add_widget(self.status_label)
 
-        self.scroll = ScrollView(do_scroll_x=False)
+        self.scroll = ScrollView(do_scroll_x=False, scroll_type=['bars', 'content'])
+        self.scroll.bar_width = dp(8)
+        self.scroll.bar_margin = dp(4)
+        try:
+            self.scroll.bar_color = (0.25, 0.55, 0.95, 0.95)
+            self.scroll.bar_inactive_color = (0.25, 0.55, 0.95, 0.25)
+        except Exception:
+            pass
         self.container = MDBoxLayout(
             orientation="vertical",
             size_hint_y=None,
