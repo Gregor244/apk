@@ -259,16 +259,17 @@ def color_for_rsi(rsi_val):
     if rsi_val >= 60: return "#FF9900"
     return "#888888"
 
-def session_label(state):
-    colors = {
-        "PREMARKET": "#FF9900",
-        "OTWARTY": "#00AA00",
-        "POSTMARKET": "#001A66",
-        "OVERNIGHT": "#7A00CC",
-        "ZAMKNIĘTY": "#777777",
-    }
+def state_color(state):
     state = (state or '').upper()
-    return f"[color={colors.get(state, '#777777')}]{state}[/color]"
+    if state == "OTWARTY":
+        return "#00AA00"
+    if state == "ZAMKNIĘTY":
+        return "#FF0000"
+    return "#55AAFF"
+
+def session_label(state):
+    state = (state or '').upper()
+    return f"[color={state_color(state)}]{state}[/color]"
 
 def timestamp_text():
     return datetime.now().strftime("%d.%m.%Y %H:%M:%S")
@@ -438,7 +439,7 @@ def exchange_session_state(raw_symbol, fallback_state=None):
 def exchange_status_line(exchange_code):
     spec = EXCHANGE_SPECS[exchange_code]
     state = exchange_current_state(exchange_code)
-    return f"[b]{spec['label']}[/b] | Stan: [b]{state}[/b]"
+    return f"[b]{spec['label']}[/b] | Stan: [b][color={state_color(state)}]{state}[/color][/b]"
 
 def exchange_hours_next_3_days_text(exchange_code):
     spec = EXCHANGE_SPECS[exchange_code]
@@ -460,8 +461,7 @@ def exchange_hours_next_3_days_text(exchange_code):
         state_now = exchange_current_state(exchange_code)
         lines.append(
             f"• {day.strftime('%d.%m.%Y')} ({day_name}): "
-            f"otwarcie {open_dt.strftime('%H:%M')} / zamknięcie {close_dt.strftime('%H:%M')} (PL) | "
-            f"stan: {state_now}"
+            f"otwarcie {open_dt.strftime('%H:%M')} / zamknięcie {close_dt.strftime('%H:%M')} (PL)"
         )
     return "\n".join(lines)
 
@@ -1003,8 +1003,9 @@ def confluence_score_engine(
         tp = safe(current_price) - max(atr_value, 0.0) * 2
         sl = safe(current_price) + max(atr_value, 0.0)
     else:
-        tp = safe(current_price)
-        sl = safe(current_price)
+        base = max(safe(atr_value, 0.0), safe(current_price) * 0.01)
+        tp = safe(current_price) + base
+        sl = safe(current_price) - base
 
     if confidence >= 70:
         market_condition = "WYSOKA PEWNOŚĆ"
@@ -1236,7 +1237,7 @@ def format_vwap_line(vwap_data):
     lower = safe(v.get("lower"))
     return (
         f"VWAP: [b]{current:.2f}[/b] "
-        f"([color={change_color(diff)}]{diff:+.2f} / {pct:+.2f}%[/color]) | "
+        f"([color={change_color(diff)}]{format_change_pair(diff, pct)}[/color]) | "
         f"Day: {day:.2f} | Band: {lower:.2f}–{upper:.2f} | Bias: [b]{bias}[/b]"
     )
 
@@ -1747,7 +1748,7 @@ async def fetch_ticker(symbol):
     pre_p = safe(fq.get("preMarketPrice")) or safe(i_meta.get("preMarketPrice")) or safe(y_meta.get("preMarketPrice")) or pre_scan or 0.0
     post_p = safe(fq.get("postMarketPrice")) or safe(i_meta.get("postMarketPrice")) or safe(y_meta.get("postMarketPrice")) or post_scan or 0.0
 
-    reg_p = quote_price
+    reg_p = quote_price or intraday_last or prev_c
     prev_c = quote_prev_close or (closes[-1] if closes else 0.0) or intraday_last
     daily_closes = _daily_closes_by_date(y_payload, y_quote)
     prev_prev_close = daily_closes[-2] if len(daily_closes) >= 2 else prev_c
@@ -1762,6 +1763,21 @@ async def fetch_ticker(symbol):
 
     if current_price <= 0:
         current_price = prev_c or intraday_last
+
+    # Jeśli quote prev_close jest zbyt blisko bieżącej ceny i mamy poprzedni zamknięty dzień,
+    # użyj go jako bezpieczniejszego odniesienia do zmiany ceny dla GPW/LSE/GER.
+    if actual_symbol.endswith(('.WA', '.L', '.DE')) and prev_prev_close > 0 and abs(current_price - prev_c) < 0.01 and abs(current_price - prev_prev_close) >= 0.01:
+        session_compare_close = prev_prev_close
+
+    if reg_p <= 0:
+        reg_p = current_price or prev_c or intraday_last
+
+    if session_state == "PREMARKET" and pre_p <= 0:
+        pre_p = current_price or prev_c or intraday_last
+    elif session_state == "POSTMARKET" and post_p <= 0:
+        post_p = current_price or prev_c or intraday_last
+    elif session_state == "OTWARTY" and reg_p <= 0:
+        reg_p = current_price or prev_c or intraday_last
 
     reg_change_open = current_price - open_price if open_price > 0 else 0.0
     reg_pct_open = (reg_change_open / open_price * 100) if open_price > 0 else 0.0
@@ -1887,7 +1903,7 @@ async def fetch_ticker(symbol):
         "pe": str(pe) if pe is not None else "N/A",
         "eps": str(eps) if eps is not None else "N/A",
         "consensus": str(consensus) if consensus is not None else "N/A",
-        "next_earnings": report_date,
+        "next_earnings": report_date if report_date not in ("N/A", "", None) else "Brak następnego raportu",
         "vwap_reference": "cena sesyjna",
         "vwap_trend": "wzrost" if vwap_diff > 0 else "spadek" if vwap_diff < 0 else "bez zmian",
         "ohlcv": ohlcv,
@@ -2022,6 +2038,15 @@ def calc_change(current, base):
     pct = (diff / base * 100) if base > 0 else 0.0
     return diff, pct
 
+def format_change_pair(diff, pct):
+    diff = safe(diff, 0.0)
+    pct = safe(pct, 0.0)
+    # Przy bardzo małych ruchach 2 miejsca po przecinku maskują zmianę jako -0.00.
+    # Tu pokazujemy więcej precyzji tylko wtedy, gdy ma to znaczenie.
+    diff_txt = f"{diff:+.4f}" if abs(diff) < 0.01 else f"{diff:+.2f}"
+    pct_txt = f"{pct:+.4f}%" if abs(pct) < 0.01 else f"{pct:+.2f}%"
+    return f"{diff_txt} / {pct_txt}"
+
 def change_color(diff):
     return "#00AA00" if diff >= 0 else "#FF0000"
 
@@ -2032,6 +2057,22 @@ def friendly_vwap_signal(signal):
         "OVERSOLD_DOWN": "Cena poniżej VWAP",
         "VWAP_MEAN_ZONE": "Przy VWAP",
     }.get(signal, signal or "N/A")
+
+def vwap_trade_hint(signal):
+    signal = (signal or "").upper()
+    if "OVERSOLD_DOWN" in signal:
+        return "Kupno"
+    if "OVEREXTENDED_UP" in signal:
+        return "Sprzedaż"
+    return "Neutralnie"
+
+def smart_money_trade_hint(regime):
+    regime = (regime or "").upper()
+    if regime in ("STRONG_LONG", "LONG"):
+        return "Kupno"
+    if regime in ("STRONG_SHORT", "SHORT"):
+        return "Sprzedaż"
+    return "Neutralnie"
 
 def friendly_liquidity(signal):
     signal = (signal or "").upper()
@@ -2435,17 +2476,22 @@ class ScannerTab(BaseTab):
             smart_money = friendly_regime(d.get("smart_money_regime", "N/A"))
             reasons = d.get("reasons", []) or []
             reasons_text = " | ".join(reasons[:3]) if reasons else "Brak dodatkowych powodów"
+            vwap_hint = vwap_trade_hint(vwap_sig)
+            sm_hint = smart_money_trade_hint(d.get("smart_money_regime", "N/A"))
+            hint_color_vwap = "#00AA00" if vwap_hint == "Kupno" else "#FF0000" if vwap_hint == "Sprzedaż" else "#55AAFF"
+            hint_color_sm = "#00AA00" if sm_hint == "Kupno" else "#FF0000" if sm_hint == "Sprzedaż" else "#55AAFF"
 
             rows.append(
                 f"[b]{s}[/b] — {d['name']} | Stan: [b]{state}[/b]\n"
-                f"Cena sesyjna: [b]{session_price:.2f}[/b] ([color={change_color(session_diff)}]{session_diff:+.2f} / {session_pct:+.2f}%[/color]) | TP: [b]{tp:.2f}[/b] | SL: [b]{sl:.2f}[/b]\n"
-                f"VWAP: [b]{safe(vwap.get('current')):.2f}[/b] ([color={change_color(safe(vwap.get('diff')))}]{safe(vwap.get('diff')):+.2f} / {safe(vwap.get('pct')):+.2f}%[/color]) | [color={vwap_col}]{friendly_vwap_signal(vwap_sig)}[/color]\n"
-                f"Pre-Market: [b]{d.get('pre_price', 0):.2f}[/b] ([color={change_color(pre_diff)}]{pre_diff:+.2f} / {pre_pct:+.2f}%[/color]) | "
-                f"Post-Market: [b]{d.get('post_price', 0):.2f}[/b] ([color={change_color(post_diff)}]{post_diff:+.2f} / {post_pct:+.2f}%[/color])\n"
+                f"Cena sesyjna: [b]{session_price:.2f}[/b] ([color={change_color(session_diff)}]{format_change_pair(session_diff, session_pct)}[/color]) | TP: [b]{tp:.2f}[/b] | SL: [b]{sl:.2f}[/b]\n"
+                f"VWAP: [b]{safe(vwap.get('current')):.2f}[/b] ([color={change_color(safe(vwap.get('diff')))}]{format_change_pair(safe(vwap.get('diff')), safe(vwap.get('pct')))}[/color]) | [color={vwap_col}]{friendly_vwap_signal(vwap_sig)}[/color]\n"
+                f"Pre-Market: [b]{d.get('pre_price', 0):.2f}[/b] ([color={change_color(pre_diff)}]{format_change_pair(pre_diff, pre_pct)}[/color]) | "
+                f"Post-Market: [b]{d.get('post_price', 0):.2f}[/b] ([color={change_color(post_diff)}]{format_change_pair(post_diff, post_pct)}[/color])\n"
                 f"SMA30: [b]{safe(v.get('sma30')):.2f}[/b] | SMA90: [b]{safe(v.get('sma90')):.2f}[/b] | RSI: [color={color_for_rsi(v.get('rsi', 0))}]{v.get('rsi', 0):.1f}[/color] | MACD: {v.get('macd', 0):.3f} | Hist: {format_histogram(v.get('hist', 0))}\n"
                 f"[b]AI / CONFLUENCE[/b]: [color={ai_col}]{friendly_confluence_signal(ai_signal)}[/color] | Pewność: [b]{conf:.0f}%[/b] | [color={ai_col}]{market_condition}[/color]\n"
                 f"Smart Money: [b]{smart_money}[/b] | {friendly_liquidity_label()}: {friendly_liquidity(d.get('liquidity_signal', 'N/A'))}\n"
                 f"Powody: {reasons_text}\n"
+                f"[b]Sugestie:[/b] VWAP: [color={hint_color_vwap}]{vwap_hint}[/color] | Smart Money: [color={hint_color_sm}]{sm_hint}[/color]\n"
             )
 
         leaders = "[b][color=#FF9900]🔥 LIDERZY ZMIAN WG. KATEGORII SESJI[/color][/b]\n"
@@ -2564,12 +2610,12 @@ class TickerTab(BaseTab):
             f"[b]{d['name']} ({d['symbol']})[/b] | Faza sesji: {session_label(d.get('session_state', 'N/A'))}\n"
             f"-------------------------------------------------\n"
             f"[b]STRUKTURA WYCENY I DANE BAZOWE[/b]\n"
-            f"Cena sesyjna: [b]{session_price:.2f} USD[/b] ([color={change_color(session_diff)}]{session_diff:+.2f} / {session_pct:+.2f}%[/color]) | TP: [b]{tp:.2f}[/b] | SL: [b]{sl:.2f}[/b]\n"
-            f"Open: [b]{open_price:.2f}[/b] | Prev Close: [b]{prev_close:.2f}[/b] | Gapa otwarcia: [color={change_color(open_gap)}]{open_gap:+.2f} / {open_gap_pct:+.2f}%[/color]\n"
-            f"Pre-Market: [b]{pre_price:.2f}[/b] ([color={change_color(pre_diff)}]{pre_diff:+.2f} / {pre_pct:+.2f}%[/color]) | Post-Market: [b]{post_price:.2f}[/b] ([color={change_color(post_diff)}]{post_diff:+.2f} / {post_pct:+.2f}%[/color])\n"
+            f"Cena sesyjna: [b]{session_price:.2f} USD[/b] ([color={change_color(session_diff)}]{format_change_pair(session_diff, session_pct)}[/color]) | TP: [b]{tp:.2f}[/b] | SL: [b]{sl:.2f}[/b]\n"
+            f"Open: [b]{open_price:.2f}[/b] | Prev Close: [b]{prev_close:.2f}[/b] | Gapa otwarcia: [color={change_color(open_gap)}]{format_change_pair(open_gap, open_gap_pct)}[/color]\n"
+            f"Pre-Market: [b]{pre_price:.2f}[/b] ([color={change_color(pre_diff)}]{format_change_pair(pre_diff, pre_pct)}[/color]) | Post-Market: [b]{post_price:.2f}[/b] ([color={change_color(post_diff)}]{format_change_pair(post_diff, post_pct)}[/color])\n"
             f"Raport następny: [b]{report_date}[/b] | Konsensus: [b]{consensus}[/b]\n\n"
             f"[b]VWAP / ZMIENNOŚĆ[/b]\n"
-            f"VWAP: [b]{safe(vwap.get('current')):.2f}[/b] ([color={change_color(safe(vwap.get('diff')))}]{safe(vwap.get('diff')):+.2f} / {safe(vwap.get('pct')):+.2f}%[/color])\n"
+            f"VWAP: [b]{safe(vwap.get('current')):.2f}[/b] ([color={change_color(safe(vwap.get('diff')))}]{format_change_pair(safe(vwap.get('diff')), safe(vwap.get('pct')))}[/color])\n"
             f"VWAP bandy: [color={vwap_col}]{safe(vwap.get('lower')):.2f} – {safe(vwap.get('upper')):.2f}[/color] | Sygnał VWAP: [b][color={vwap_col}]{friendly_vwap_signal(vwap_sig)}[/color][/b] | Trend: [b]{vwap_trend}[/b]\n"
             f"Zmienność: [b]{safe(bb.get('lower')):.2f} – {safe(bb.get('upper')):.2f}[/b] | ATR: {safe(d.get('atr')):.4f}\n\n"
             f"[b]SMART MONEY / RYNEK[/b]\n"
@@ -2578,6 +2624,7 @@ class TickerTab(BaseTab):
             f"Kierunek: {friendly_direction(direction)}\n"
             f"Smart money: [b]{friendly_regime(sm_regime)}[/b] | Score: {d.get('smart_money_score', 0)}\n"
             f"FVG: {fvg_count} | Strefy zleceń: {ob_count} | Smart money: {d.get('smart_money_score', 0)}\n\n"
+            f"Sugestie: VWAP [b]{vwap_trade_hint(vwap_sig)}[/b] | Smart Money [b]{smart_money_trade_hint(sm_regime)}[/b]\n"
             f"[b]TREND / SIŁA RUCHU[/b]\n"
             f"SMA30: {v.get('sma30', 'N/A')} | SMA90: {v.get('sma90', 'N/A')}\n"
             f"RSI: [color={color_for_rsi(v.get('rsi', 0))}]{v.get('rsi', 0):.1f}[/color] | MACD: {v.get('macd', 0):.3f} | Hist: {format_histogram(v.get('hist', 0))}\n"
@@ -2673,7 +2720,7 @@ class AkcjeTab(BaseTab):
             rows.append(
                 f"[b]{d['name']} ({s})[/b]| Sygnał AI: [b][color={v.get('signal_color', 'white')}] {v.get('signal', 'BRAK')}[/color][/b] | (Score: {v.get('prob', 0):.0f}%)\n \n"
                 f"Sesja: {session_label(d['session_state'])}\n"
-                f"Cena sesyjna: [b]{session_price:.2f}[/b] ([color={change_color(session_diff)}]{session_diff:+.2f} / {session_pct:+.2f}%[/color]) | "
+                f"Cena sesyjna: [b]{session_price:.2f}[/b] ([color={change_color(session_diff)}]{format_change_pair(session_diff, session_pct)}[/color]) | "
                 f"TP: [b]{make_tp_sl(session_price)[0]:.2f}[/b] | SL: [b]{make_tp_sl(session_price)[1]:.2f}[/b]\n"
                 f"VWAP: {friendly_vwap_signal(d.get('vwap_signal', 'N/A'))} / {vwap_trend}\n"
                 f"VWAP: [b]{safe(vwap.get('current')):.2f}[/b] | {friendly_vwap_band_label()}: {safe(vwap.get('lower')):.2f} – {safe(vwap.get('upper')):.2f}\n"
@@ -2769,9 +2816,10 @@ class CFDTab(BaseTab):
             rows.append(
                 f"[b]{d['name']} ({s})[/b] |Sygnał AI: [b][color={v.get('signal_color', 'white')}] {v.get('signal', 'BRAK')}[/color][/b] | "
                 f"Score: {v.get('prob', 0):.0f}%\n"
-                f"Cena sesyjna: [b]{session_price:.2f}[/b] ([color={change_color(session_diff)}]{session_diff:+.2f} / {session_pct:+.2f}%[/color]) |TP: {tp:.2f} | SL: {sl:.2f}\n"
+                f"Cena sesyjna: [b]{session_price:.2f}[/b] ([color={change_color(session_diff)}]{format_change_pair(session_diff, session_pct)}[/color]) |TP: {tp:.2f} | SL: {sl:.2f}\n"
                 f"VWAP: {friendly_vwap_signal(d.get('vwap_signal', 'N/A'))} / {vwap_trend}\n"
                 f"VWAP: [b]{safe(vwap.get('current')):.2f}[/b] | {friendly_vwap_band_label()}: {safe(vwap.get('lower')):.2f} – {safe(vwap.get('upper')):.2f}\n"
+                f"Sugestie: VWAP [b]{vwap_trade_hint(d.get('vwap_signal', 'N/A'))}[/b] | Smart Money [b]{smart_money_trade_hint(d.get('smart_money_regime', 'N/A'))}[/b]\n"
                 f"{friendly_liquidity_label()}: {friendly_liquidity(d.get('liquidity_signal', 'N/A'))} | {friendly_mss_label()}: {friendly_structure(d.get('market_structure', 'N/A'))} | {friendly_smc_label()}: {int(safe(d.get('smart_money_score')))}"
             )
 
@@ -2837,9 +2885,11 @@ class KatalizatoryTab(BaseTab):
 class LiveDataTab(MDBoxLayout, MDTabsBase):
     title = "Live data"
 
+    DEFAULT_TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "CDR.WA", "PKO.WA"]
+
     def __init__(self, **kw):
         super().__init__(orientation="vertical", **kw)
-        self.tickers = list(dict.fromkeys(["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "CDR.WA", "PKO.WA"]))
+        self.tickers = self._load_tickers()
         self.history = {sym: deque(maxlen=5) for sym in self.tickers}
         self._lock = threading.Lock()
 
@@ -2907,6 +2957,32 @@ class LiveDataTab(MDBoxLayout, MDTabsBase):
     def _normalize(self, symbol):
         return (symbol or "").strip().upper()
 
+    def _load_tickers(self):
+        defaults = list(dict.fromkeys(self.DEFAULT_TICKERS))
+        try:
+            if os.path.exists(STATE_FILE):
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f) or {}
+                live = data.get("live_tickers", [])
+                cleaned = [self._normalize(s) for s in live if self._normalize(s)]
+                if cleaned:
+                    return list(dict.fromkeys(cleaned))
+        except Exception:
+            pass
+        return defaults
+
+    def _save_tickers(self):
+        try:
+            payload = {}
+            if os.path.exists(STATE_FILE):
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    payload = json.load(f) or {}
+            payload["live_tickers"] = list(dict.fromkeys(self.tickers))
+            with open(STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     def _active_symbols(self):
         if not getattr(self, "live_updates_enabled", True):
             return []
@@ -2969,6 +3045,7 @@ class LiveDataTab(MDBoxLayout, MDTabsBase):
         symbol = self._ensure_ticker(self.live_input.text)
         if symbol:
             self.live_input.text = ""
+            self._save_tickers()
             self.status_label.text = f"[color=#00AA00]Dodano ticker: {symbol}[/color]"
             self.refresh_view()
             self._sync_engine_symbols()
@@ -2979,6 +3056,7 @@ class LiveDataTab(MDBoxLayout, MDTabsBase):
             if symbol in self.tickers:
                 self.tickers.remove(symbol)
                 self.history.pop(symbol, None)
+                self._save_tickers()
                 self.status_label.text = f"[color=#FF0000]Usunięto ticker: {symbol}[/color]"
                 self.refresh_view()
                 self._sync_engine_symbols()
@@ -2989,6 +3067,7 @@ class LiveDataTab(MDBoxLayout, MDTabsBase):
         with self._lock:
             self.tickers = list(dict.fromkeys(["AAPL", "MSFT", "NVDA", "TSLA", "AMD", "CDR.WA", "PKO.WA"]))
             self.history = {sym: deque(maxlen=5) for sym in self.tickers}
+        self._save_tickers()
         self.status_label.text = "[color=#888888]Przywrócono domyślne tickery.[/color]"
         self.refresh_view()
         self._sync_engine_symbols()
@@ -3368,6 +3447,11 @@ class StockScanner(MDApp):
 
     def on_stop(self):
         global HTTP_CLIENT
+        try:
+            if self.live_tab:
+                self.live_tab._save_tickers()
+        except Exception:
+            pass
         try:
             if self.engine:
                 self.engine.stop()
