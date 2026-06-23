@@ -26,8 +26,11 @@ String = autoclass('java.lang.String')
 CHANNEL_ID = "stockscanner_channel"
 CHANNEL_NAME = "StockScanner"
 
-service = PythonService.mService
-context = service.getApplicationContext()
+def get_service_context():
+    service = PythonService.mService
+    if service is None:
+        raise RuntimeError("Service not ready yet")
+    return service.getApplicationContext()
 
 
 def create_notification():
@@ -73,15 +76,20 @@ def create_notification():
 
 
 def main():
-
     try:
+        service = PythonService.mService
+        if service is None:
+            time.sleep(1)
+            service = PythonService.mService
+
+        if service is None:
+            return
+
+        context = service.getApplicationContext()
 
         notification = create_notification()
 
-        service.startForeground(
-            1001,
-            notification
-        )
+        service.startForeground(1001, notification)
 
         while True:
             time.sleep(5)
