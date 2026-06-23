@@ -18,7 +18,7 @@ PYTHON / KIVY
 
 #==================================================
 
-requirements = hostpython3==3.11.8,python3==3.11.8,kivy==2.3.0,kivymd==1.2.0,pillow,aiohttp==3.9.5,websockets==12.0,requests,plyer,certifi,httpx,pyjnius,urllib3,pytz,chardet,idna
+requirements = python3,kivy,kivymd,pillow,requests,plyer,certifi,httpx,pytz,pyjnius
 #==================================================
 
 ANDROID
@@ -59,6 +59,7 @@ p4a.bootstrap = sdl2
 p4a.extra_args = --ignore-setup-py --debug
 # WAŻNE DLA STABILNOŚCI
 environment = LANG=en_US.UTF-8
+p4a.branch = master
 #==================================================
 
 LOGS
