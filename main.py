@@ -3662,11 +3662,11 @@ class StockScanner(MDApp):
 
     def on_start(self):
         start_async_loop()
-        Clock.schedule_once(lambda dt: self.start_foreground_service(), 0.1)
-        Clock.schedule_once(lambda dt: self.init_firebase(), 0.2)
-        Clock.schedule_once(lambda dt: self.request_battery_optimization_exception(), 0.3)
-        Clock.schedule_once(lambda dt: self.info_tab.load_data_if_needed(), 0.5)
-        Clock.schedule_once(lambda dt: self.start_v4_engine(), 1.0)
+        Clock.schedule_once(lambda dt: self.start_foreground_service(), 3)
+        Clock.schedule_once(lambda dt: self.init_firebase(), 3.5)
+        Clock.schedule_once(lambda dt: self.request_battery_optimization_exception(), 5)
+        Clock.schedule_once(lambda dt: self.info_tab.load_data_if_needed(), 7.5)
+        Clock.schedule_once(lambda dt: self.start_v4_engine(), 9.0)
         if self.tabs:
             self.tabs.bind(on_tab_switch=self.on_tab_switch)
         Clock.schedule_once(lambda dt: self.update_live_symbols(getattr(self.live_tab, "tickers", [])), 1.2)
