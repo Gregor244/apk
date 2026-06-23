@@ -40,6 +40,7 @@ android.archs = arm64-v8a
 android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE
 
 android.release_artifact = apk
+android.foreground_service_type = dataSync
 
 #==================================================
 
