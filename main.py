@@ -53,16 +53,12 @@ except Exception:
 
 try:
     from zoneinfo import ZoneInfo
-except ImportError:
+except Exception:
+    import pytz
+
     class ZoneInfo:
-        def __init__(self, name):
-            self.tz = timezone.utc
-        def __call__(self, *args, **kwargs):
-            return self.tz
-        def utcoffset(self, dt=None):
-            return timedelta(0)
-        def tzname(self, dt=None):
-            return "UTC"
+        def __new__(cls, name):
+            return pytz.timezone(name)
 
 # =========================================
 # CONFIGURATION & CONSTANTS
@@ -90,7 +86,7 @@ REQUEST_CACHE_TTL = {
 }
 
 LAST_REQUEST_TIME = {}
-RATE_LIMIT_LOCK = asyncio.Lock()
+RATE_LIMIT_LOCK = None
 ASYNC_LOOP = None
 ASYNC_LOOP_READY = threading.Event()
 
@@ -146,7 +142,9 @@ CFD_FRIENDLY = {
 LOCAL_TZ = ZoneInfo("Europe/Warsaw")
 NY_TZ = ZoneInfo("America/New_York")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(BASE_DIR, "v10_state.json")
+
+STATE_FILE = os.path.join(App.get_running_app().user_data_dir, "v10_state.json")
+
 
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 LONDON_TZ = ZoneInfo("Europe/London")
