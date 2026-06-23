@@ -60,7 +60,7 @@ p4a.bootstrap = sdl2
 p4a.extra_args = --ignore-setup-py --debug
 # WAŻNE DLA STABILNOŚCI
 environment = LANG=en_US.UTF-8
-p4a.branch = master
+p4a.branch = develop
 #==================================================
 
 LOGS
