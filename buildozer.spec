@@ -1,5 +1,4 @@
 [app]
-
 title = StockScannerV10
 package.name = stockscanner
 package.domain = org.gregor
@@ -8,64 +7,43 @@ source.dir = .
 source.include_exts = py,kv,png,jpg,json,txt,xml
 
 version = 10.0
-
 orientation = portrait
 fullscreen = 0
 
-#==================================================
-
-PYTHON / KIVY
-
-#==================================================
-
 requirements = python3,kivy,kivymd,pillow,requests,plyer,certifi,httpx,pytz,pyjnius
-#==================================================
 
-ANDROID
-
-#==================================================
-
-android.api = 34
+# =========================
+# ANDROID (STABLE BASE)
+# =========================
+android.api = 33
 android.minapi = 24
 android.ndk_api = 24
-
-android.sdk = 34
 android.ndk = 25b
 
-android.accept_sdk_license = True
-android.enable_androidx = True
-
 android.archs = arm64-v8a
+android.enable_androidx = True
+android.accept_sdk_license = True
 
 android.permissions = INTERNET,VIBRATE,WAKE_LOCK,FOREGROUND_SERVICE
 
-android.release_artifact = apk
+# =========================
+# 🔥 SERVICES (FIXED PRO VERSION)
+# =========================
+android.services = scanner:service.py
+
+# Android 12–16 requirement
 android.foreground_service_type = dataSync
 
-#==================================================
+# =========================
+# PYTHON-FOR-ANDROID STABILITY
+# =========================
+p4a.branch = stable
 
-SERVICES
+# ❌ HARD FIX FOR CRASHES
+android.disable_recipes = libthorvg
 
-#==================================================
-
-android.services = ScannerService:service.py
-
-#==================================================
-
-P4A
-
-#==================================================
-
-p4a.bootstrap = sdl2
-p4a.extra_args = --ignore-setup-py --debug
-# WAŻNE DLA STABILNOŚCI
-environment = LANG=en_US.UTF-8
-p4a.branch = develop
-#==================================================
-
-LOGS
-
-#==================================================
-
+# =========================
+# LOGGING
+# =========================
 log_level = 2
 warn_on_root = 0
