@@ -53,12 +53,22 @@ except Exception:
 
 try:
     from zoneinfo import ZoneInfo
+    _ZONEINFO_OK = True
 except Exception:
-    import pytz
+    _ZONEINFO_OK = False
 
-    class ZoneInfo:
-        def __new__(cls, name):
-            return pytz.timezone(name)
+def _tz(name: str):
+    if _ZONEINFO_OK:
+        try:
+            return ZoneInfo(name)
+        except Exception:
+            pass
+    try:
+        import pytz
+        return pytz.timezone(name)
+    except Exception:
+        return timezone.utc
+
 
 # =========================================
 # CONFIGURATION & CONSTANTS
@@ -139,17 +149,19 @@ CFD_FRIENDLY = {
     "^GSPC": "S&P 500", "^NDX": "Nasdaq 100", "^DJI": "Dow Jones 30"
 }
 
-LOCAL_TZ = ZoneInfo("Europe/Warsaw")
-NY_TZ = ZoneInfo("America/New_York")
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 STATE_FILE = os.path.join(App.get_running_app().user_data_dir, "v10_state.json")
 
+LOCAL_TZ = _tz("Europe/Warsaw")
+NY_TZ = _tz("America/New_York")
+WARSAW_TZ = _tz("Europe/Warsaw")
+LONDON_TZ = _tz("Europe/London")
+BERLIN_TZ = _tz("Europe/Berlin")
+NEWYORK_TZ = _tz("America/New_York")
 
-WARSAW_TZ = ZoneInfo("Europe/Warsaw")
-LONDON_TZ = ZoneInfo("Europe/London")
-BERLIN_TZ = ZoneInfo("Europe/Berlin")
-NEWYORK_TZ = ZoneInfo("America/New_York")
+
 
 # =========================================
 # HARDENED NETWORK SUBSYSTEM (HTTPX CORE)
@@ -2112,7 +2124,8 @@ def compute_session_metrics(session_state, regular_price, current_price, prev_cl
         compare_base = regular_price or prev_close
     else:
         session_price = regular_price or current_price or prev_close
-        compare_base = pre_price if session_state == "OTWARTY" and pre_price > 0 else prev_close
+        compare_base = prev_close
+
 
     if session_price <= 0:
         session_price = current_price or prev_close
