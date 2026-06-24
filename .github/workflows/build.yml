@@ -2,7 +2,10 @@ name: Android PRO Build
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,51 +26,127 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install system deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git zip unzip \
-            build-essential \
-            libffi-dev libssl-dev \
-            python3-dev \
-            zlib1g-dev cmake \
-            libltdl-dev libsqlite3-dev \
-            gettext autopoint
 
-      - name: Install Python deps
+          sudo apt-get install -y \
+            git \
+            zip \
+            unzip \
+            openjdk-17-jdk \
+            python3-pip \
+            autoconf \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libtinfo5 \
+            cmake \
+            libffi-dev \
+            libssl-dev \
+            build-essential \
+            ccache \
+            liblzma-dev \
+            libsqlite3-dev \
+            sqlite3 \
+            bzip2 \
+            libbz2-dev \
+            wget \
+            curl \
+            llvm \
+            gettext \
+            autopoint
+
+      - name: Install Python tools
         run: |
           python -m pip install --upgrade pip
-          python -m pip install buildozer cython==0.29.36
 
-      # =========================
-      # CACHE BOOST (PRO FEATURE)
-      # =========================
+          pip install \
+            buildozer==1.5.0 \
+            cython==0.29.36
+
+      # =====================================
+      # CACHE
+      # =====================================
+
       - name: Cache Buildozer
         uses: actions/cache@v4
         with:
           path: |
             ~/.buildozer
             .buildozer
-          key: buildozer-${{ runner.os }}
+          key: buildozer-${{ runner.os }}-v3
 
-      - name: Clean
+      # =====================================
+      # CLEAN
+      # =====================================
+
+      - name: Clean old builds
         run: |
           rm -rf bin
+          rm -rf .buildozer/android/platform/build-arm64-v8a
+
+      # =====================================
+      # INIT BUILD
+      # =====================================
 
       - name: Init Buildozer
         run: |
           buildozer android update
 
+      # =====================================
+      # PATCH LIBTHORVG CRASH
+      # =====================================
+
+      - name: Patch libthorvg recipe
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path(".buildozer/android/platform/python-for-android/pythonforandroid/recipes/libthorvg/__init__.py")
+
+          if not p.exists():
+              print("libthorvg recipe not found")
+              raise SystemExit(0)
+
+          s = p.read_text()
+
+          old = "clang_lib_dir = glob(pattern)[0]"
+
+          new = """
+                  matches = glob(pattern)
+
+                  if not matches:
+                      print("libthorvg clang dir missing - skipping")
+                      return
+
+                  clang_lib_dir = matches[0]
+          """
+
+          if old in s:
+              s = s.replace(old, new)
+              p.write_text(s)
+              print("libthorvg patched successfully")
+          else:
+              print("Patch pattern not found")
+          PY
+
+      # =====================================
+      # BUILD APK
+      # =====================================
+
       - name: Build APK
         run: |
-          buildozer android debug deploy run
+          buildozer android debug
+
+      # =====================================
+      # UPLOAD APK
+      # =====================================
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: stockscanner-pro-apk
+          name: stockscanner-apk
           path: bin/*.apk
-      - name: Init Buildozer
-        run: |
-         buildozer android update
