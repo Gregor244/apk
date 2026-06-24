@@ -10,8 +10,12 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    env:
+      PIP_NO_BUILD_ISOLATION: 1
+      SETUPTOOLS_USE_DISTUTILS: stdlib
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -19,43 +23,46 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install Java 17
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: "17"
 
-      - name: Install dependencies
+      - name: Install Linux dependencies
         run: |
           sudo apt update
 
           sudo apt install -y \
             zip \
             unzip \
+            git \
+            curl \
+            wget \
+            build-essential \
             autoconf \
+            automake \
             libtool \
             pkg-config \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev \
             cmake \
             libffi-dev \
             libssl-dev \
-            build-essential \
-            git \
-            wget \
-            curl \
-            python3-pip
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev
 
-      - name: Install Buildozer
+      - name: Install Python packages
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip==23.3.1
 
           pip install \
-            cython==0.29.33 \
-            buildozer==1.5.0
+            setuptools==65.7.0 \
+            wheel==0.41.2 \
+            cython==0.29.33
 
-      - name: Clean old caches
+          pip install buildozer==1.5.0
+
+      - name: Clean previous builds
         run: |
           rm -rf .buildozer
           rm -rf ~/.buildozer
@@ -63,14 +70,14 @@ jobs:
           rm -rf ~/.cache/python-for-android
           rm -rf bin
 
-      - name: Set Android environment
+      - name: Configure Android SDK
         run: |
           echo "ANDROIDSDK=/usr/local/lib/android/sdk" >> $GITHUB_ENV
           echo "ANDROIDNDK=/usr/local/lib/android/sdk/ndk/25.2.9519653" >> $GITHUB_ENV
           echo "ANDROIDAPI=33" >> $GITHUB_ENV
           echo "NDKAPI=24" >> $GITHUB_ENV
 
-      - name: Accept SDK licenses
+      - name: Accept Android licenses
         run: yes | sdkmanager --licenses || true
 
       - name: Build APK
