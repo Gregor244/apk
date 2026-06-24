@@ -37,7 +37,7 @@ android.foreground_service_type = dataSync
 # =========================
 # PYTHON-FOR-ANDROID STABILITY
 # =========================
-p4a.branch = stable
+p4a.branch = develop
 
 # ❌ HARD FIX FOR CRASHES
 android.disable_recipes = libthorvg
