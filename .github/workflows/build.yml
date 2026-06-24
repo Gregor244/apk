@@ -78,6 +78,14 @@ jobs:
           rm -rf ~/.cache/python-for-android
           rm -rf bin
 
+      - name: Set Android env
+        run: |
+         echo "ANDROIDSDK=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+         echo "ANDROIDNDK=/home/runner/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
+         echo "ANDROIDAPI=33" >> $GITHUB_ENV
+         echo "NDKAPI=24" >> $GITHUB_ENV
+         echo "ANDROID_NDK_ROOT=" >> $GITHUB_ENV
+
       - name: Configure Android SDK
         run: |
           echo "ANDROIDSDK=/usr/local/lib/android/sdk" >> $GITHUB_ENV
