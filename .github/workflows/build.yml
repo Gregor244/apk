@@ -11,7 +11,8 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      PIP_NO_BUILD_ISOLATION: 1
+      PIP_NO_BUILD_ISOLATION: "1"
+      PIP_PREFER_BINARY: "1"
       SETUPTOOLS_USE_DISTUTILS: stdlib
 
     steps:
@@ -32,43 +33,21 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt update
-
-      - name: Install p4a stable
-        run: |
-         pip uninstall -y python-for-android || true
-         git clone https://github.com/kivy/python-for-android.git
-         cd python-for-android
-         git checkout stable
-         pip install .
-
           sudo apt install -y \
-            zip \
-            unzip \
-            git \
-            curl \
-            wget \
-            build-essential \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config \
-            cmake \
-            libffi-dev \
-            libssl-dev \
-            zlib1g-dev \
-            libncurses5-dev \
-            libncursesw5-dev
+            zip unzip git curl wget \
+            build-essential autoconf automake libtool pkg-config \
+            cmake libffi-dev libssl-dev \
+            zlib1g-dev libncurses5-dev libncursesw5-dev
 
       - name: Install Python packages
         run: |
+          python -V
+          which python
+          python -m pip --version
+
           python -m pip install --upgrade pip==23.3.1
-
-          pip install \
-            setuptools==65.7.0 \
-            wheel==0.41.2 \
-            cython==0.29.33
-
-          pip install buildozer==1.5.0
+          python -m pip install setuptools==65.7.0 wheel==0.41.2 cython==0.29.36
+          python -m pip install --no-build-isolation buildozer==1.5.0
 
       - name: Clean previous builds
         run: |
@@ -77,14 +56,6 @@ jobs:
           rm -rf ~/.cache/buildozer
           rm -rf ~/.cache/python-for-android
           rm -rf bin
-
-      - name: Set Android env
-        run: |
-         echo "ANDROIDSDK=/home/runner/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
-         echo "ANDROIDNDK=/home/runner/.buildozer/android/platform/android-ndk-r25b" >> $GITHUB_ENV
-         echo "ANDROIDAPI=33" >> $GITHUB_ENV
-         echo "NDKAPI=24" >> $GITHUB_ENV
-         echo "ANDROID_NDK_ROOT=" >> $GITHUB_ENV
 
       - name: Configure Android SDK
         run: |
