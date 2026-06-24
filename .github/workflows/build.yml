@@ -1,11 +1,10 @@
-name: Android Build Stable
+name: Build Android APK
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-
-  workflow_dispatch:
 
 jobs:
   build:
@@ -18,120 +17,68 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
-      - name: Setup Java
+      - name: Install Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: 17
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
+          sudo apt update
 
-          sudo apt-get install -y \
-            git zip unzip \
-            autoconf libtool pkg-config \
+          sudo apt install -y \
+            zip \
+            unzip \
+            autoconf \
+            libtool \
+            pkg-config \
             zlib1g-dev \
-            build-essential \
+            libncurses5-dev \
+            libncursesw5-dev \
             cmake \
             libffi-dev \
             libssl-dev \
-            ccache \
-            liblzma-dev \
-            libsqlite3-dev \
-            sqlite3 \
-            bzip2 \
-            libbz2-dev \
-            wget curl \
-            llvm gettext autopoint
+            build-essential \
+            git \
+            wget \
+            curl \
+            python3-pip
 
-      - name: Install Python packages
+      - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip
 
           pip install \
-            buildozer==1.5.0 \
-            cython==0.29.36
+            cython==0.29.33 \
+            buildozer==1.5.0
 
-      - name: Clean old builds
+      - name: Clean old caches
         run: |
           rm -rf .buildozer
           rm -rf ~/.buildozer
+          rm -rf ~/.cache/buildozer
+          rm -rf ~/.cache/python-for-android
           rm -rf bin
 
-      # ==========================================
-      # INIT p4a
-      # ==========================================
-
-      - name: Initialize buildozer
+      - name: Set Android environment
         run: |
-          buildozer init || true
-          buildozer android update || true
+          echo "ANDROIDSDK=/usr/local/lib/android/sdk" >> $GITHUB_ENV
+          echo "ANDROIDNDK=/usr/local/lib/android/sdk/ndk/25.2.9519653" >> $GITHUB_ENV
+          echo "ANDROIDAPI=33" >> $GITHUB_ENV
+          echo "NDKAPI=24" >> $GITHUB_ENV
 
-      # ==========================================
-      # FORCE DOWNLOAD p4a
-      # ==========================================
-
-      - name: Prepare python-for-android
-        run: |
-          mkdir -p .buildozer/android/platform
-
-          if [ ! -d ".buildozer/android/platform/python-for-android" ]; then
-            git clone https://github.com/kivy/python-for-android.git \
-              .buildozer/android/platform/python-for-android
-          fi
-
-      # ==========================================
-      # PATCH LIBTHORVG
-      # ==========================================
-
-      - name: Patch libthorvg
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          p = Path(".buildozer/android/platform/python-for-android/pythonforandroid/recipes/libthorvg/__init__.py")
-
-          print("PATCH FILE:", p)
-
-          txt = p.read_text()
-
-          old = "clang_lib_dir = glob(pattern)[0]"
-
-          new = '''
-                  matches = glob(pattern)
-
-                  if not matches:
-                      print("SKIP libthorvg")
-                      return
-
-                  clang_lib_dir = matches[0]
-          '''
-
-          if old in txt:
-              txt = txt.replace(old, new)
-              p.write_text(txt)
-              print("PATCH APPLIED")
-          else:
-              print("PATTERN NOT FOUND")
-          PY
-
-      # ==========================================
-      # BUILD APK
-      # ==========================================
+      - name: Accept SDK licenses
+        run: yes | sdkmanager --licenses || true
 
       - name: Build APK
         run: |
           buildozer android debug
 
-      # ==========================================
-      # UPLOAD
-      # ==========================================
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: apk
+          name: stockscanner-apk
           path: bin/*.apk
