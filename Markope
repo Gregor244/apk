@@ -1,0 +1,235 @@
+import pandas as pd
+import yfinance as yf
+import requests
+import time
+import numpy as np
+
+# =========================
+# CONFIG
+# =========================
+MAX_PRICE = 40.0
+BATCH_SIZE = 50
+
+ORB_ZAKRESY = {
+    10: "09:40",
+    20: "09:50",
+    30: "10:00"
+}
+
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0"
+})
+
+# =========================
+# LOAD TICKERS
+# =========================
+TICKERS = ["AA", "AAL", "AAP", "AB", "ABM", "ABR", "ABT", "ACB", "ACGL", "ACHR", "ACIW", "ACM", "ACP", "AD", "ADC",
+"ADEA", "ADM", "ADNT", "ADTN", "AFRM", "AGIO", "AGNC", "AI", "AIG", "AIN", "AKBA", "ALC", "ALGM", "ALHC", "ALK",
+"ALKS", "ALM", "ALNT", "ALRM", "ALVO", "AMBA", "AMC", "AMCR", "AMCX", "AMKR", "AMPH", "AMRX", "AMRZ", "AMS", "AMSC",
+"AMX", "ANGO", "AORT", "AOS", "AOSL", "APA", "APAM", "APEI", "APLE", "APPS", "APTV", "AQN", "ARCC", "ARE", "ARI",
+"ARMK", "ARQQ", "ARQT", "ARWR", "ASAN", "ASC", "ASH", "ASIX", "ASM", "ASTS", "ASX", "ATEN", "ATHM", "ATKR", "ATRO",
+"AU", "AUB", "AVT", "AVTR", "AWR", "AX", "AXTA", "AZTA", "BABA", "BAC", "BAER", "BAK", "BALL", "BAND", "BATRK",
+"BAX", "BB", "BBAR", "BBVA", "BBW", "BBWI", "BBY", "BC", "BCC", "BEAM", "BEN", "BEPC", "BGS", "BHC", "BHF",
+"BHP", "BILI", "BILL", "BIRK", "BJ", "BJRI", "BKH", "BKR", "BKT", "BL", "BLDP", "BLND", "BLNK", "BMA", "BMBL",
+"BME", "BMRN", "BMY", "BN", "BNR", "BNTX", "BON", "BP", "BRBR", "BRKR", "BRO", "BROS", "BSAC", "BSX", "BTI",
+"BUD", "BWA", "BXMT", "BXP", "BYD", "BYND", "BZ", "BZH", "BZUN", "CAAP", "CAF", "CAG", "CAKE", "CALM", "CALX",
+"CALY", "CARG", "CARR", "CARS", "CBK", "CBRL", "CC", "CCC", "CCI", "CCL", "CCOI", "CCS", "CCSI", "CCU", "CDLX",
+"CE", "CELH", "CENT", "CENX", "CERS", "CEVA", "CFG", "CGC", "CGNX", "CHD", "CHDN", "CHEF", "CHGG", "CHWY", "CIB",
+"CL", "CLDX", "CLF", "CLNE", "CLW", "CLX", "CMBT", "CMC", "CMCSA", "CMG", "CMP", "CMPR", "CMPS", "CMS", "CNA",
+"CNC", "CNK", "CNMD", "CNO", "CNP", "CNR", "CNXC", "COHU", "COLB", "COLM", "COMP", "CON", "COO", "CORT", "CORZ",
+"COUR", "CPB", "CPRI", "CPRT", "CPS", "CRCT", "CRI", "CRK", "CRNC", "CRSP", "CRSR", "CRTO", "CRWV", "CSGP", "CSIQ",
+"CSR", "CSTL", "CSX", "CTMX", "CTRE", "CTSH", "CTVA", "CVE", "CVI", "CWEN", "CWK", "CWT", "CYD", "D", "DAL",
+"DAR", "DBX", "DCH", "DCI", "DDD", "DEA", "DEC", "DEI", "DEO", "DIN", "DINO", "DIS", "DK", "DKNG", "DLB",
+"DLX", "DNP", "DOCS", "DOCU", "DOW", "DOX", "DRD", "DSY", "DX", "DXC", "DXCM", "DYN", "EBF", "EBS", "EC",
+"EDIT", "EDRY", "EEFT", "EFC", "EGBN", "EHTH", "EIX", "EL", "ELAN", "ELE", "EMBJ", "EMN", "ENB", "ENO", "ENR",
+"ENTA", "ENVX", "EOSE", "EPAC", "EPAM", "EPC", "EPRT", "EQH", "EQNR", "EQR", "EQS", "EQT", "ERII", "ES", "ESI",
+"ESNT", "ESTA", "ESTC", "ETSY", "EVH", "EVO", "EW", "EXC", "EXE", "EXEL", "EXLS", "EXPO", "EXTR", "EYE", "EYPT",
+"EZPW", "F", "FAF", "FAST", "FATE", "FBIN", "FBK", "FC", "FCT", "FE", "FER", "FF", "FHI", "FIBK", "FIS",
+"FISI", "FISV", "FITB", "FIVN", "FIZZ", "FLO", "FLS", "FLWS", "FLYW", "FMC", "FND", "FNF", "FOR", "FOX", "FOXA",
+"FOXF", "FR", "FRA", "FRO", "FROG", "FRPT", "FSLY", "FTEK", "FTS", "FTV", "FUBO", "FUL", "FUTU", "FVRR", "FWONA",
+"FWONK", "G", "GAIN", "GAP", "GBDC", "GBX", "GDDY", "GDRX", "GDS", "GEF", "GEHC", "GEN", "GENI", "GERN", "GFI",
+"GFL", "GGB", "GGG", "GIB", "GIL", "GIS", "GLBE", "GLE", "GLO", "GLOB", "GLPI", "GM", "GMAB", "GMED", "GNTX",
+"GO", "GOLD", "GOOS", "GPCR", "GPK", "GPN", "GPRE", "GRAB", "GRAL", "GRBK", "GRF", "GRFS", "GRI", "GRND", "GRPN",
+"GSAT", "GSK", "GSL", "GTLB", "GTM", "GTN", "GXO", "GYRE", "HAIN", "HALO", "HAS", "HASI", "HCC", "HCSG", "HDB",
+"HE", "HELE", "HHH", "HIMS", "HIMX", "HIPO", "HLF", "HLN", "HLNE", "HMC", "HOG", "HOOD", "HP", "HPP", "HPQ",
+"HR", "HRB", "HRL", "HRTG", "HRTX", "HSBC", "HSIC", "HST", "HTLD", "HTO", "HUBG", "HUN", "HURN", "HUYA", "HXL",
+"HYLN", "HZO", "IAG", "IART", "IBN", "IBRX", "ICG", "IDR", "IFF", "III", "ILPT", "IMAX", "IMSR", "IMVT", "INFY",
+"ING", "INGR", "INMD", "INO", "INR", "INSP", "INVH", "IONS", "IOT", "IP", "IPI", "IQ", "IR", "IRDM", "ITP",
+"ITRI", "JACK", "JD", "JEF", "JKS", "JMIA", "JOYY", "KBH", "KBR", "KC", "KD", "KDP", "KELYA", "KEP", "KFY",
+"KHC", "KIDS", "KIM", "KMI", "KMT", "KMX", "KNSA", "KNX", "KO", "KR", "KRNT", "KSS", "KTN", "KTOS", "KVUE",
+"KYNB", "KZIA", "LAND", "LASR", "LAUR", "LBTYA", "LCID", "LCII", "LE", "LEDS", "LEG", "LEGN", "LEN", "LEVI", "LGIH",
+"LI", "LINC", "LIVN", "LKQ", "LMND", "LNC", "LNT", "LOB", "LOGI", "LOMA", "LPX", "LRE", "LRN", "LTBR", "LTC",
+"LUV", "LVS", "LYB", "LYFT", "LYG", "LZB", "M", "MAN", "MANU", "MARA", "MAS", "MATV", "MB", "MBIN", "MBLY",
+"MBUU", "MC", "MCHP", "MD", "MDLZ", "MDT", "MDU", "MDV", "MED", "MET", "MFC", "MFG", "MGA", "MGM", "MGNI",
+"MGPI", "MGY", "MICC", "MKC", "MLCO", "MLKN", "MMS", "MMSI", "MMT", "MMTX", "MMYT", "MNDY", "MNKD", "MNRO", "MNST",
+"MO", "MOMO", "MOS", "MP", "MPT", "MRNA", "MT", "MTCH", "MTG", "MTH", "MTX", "MUFG", "MWA", "MXL", "MYGN",
+"NATL", "NCLH", "NCNO", "NDAQ", "NDLS", "NE", "NEE", "NEM", "NEO", "NFE", "NFG", "NFLX", "NG", "NGG", "NGVC",
+"NHI", "NI", "NICE", "NIO", "NJR", "NKE", "NKTR", "NMIH", "NN", "NNN", "NNOX", "NOMD", "NOV", "NOW", "NRIM",
+"NRO", "NSP", "NTCT", "NTGR", "NTLA", "NTNX", "NTR", "NU", "NVAX", "NVCR", "NVO", "NVST", "NVTS", "NWBI", "NWG",
+"NWL", "NX", "NYT", "O", "OBDC", "OGN", "OHI", "OKE", "OKLO", "OLED", "OLLI", "OLN", "OLP", "OMC", "ON",
+"OPCH", "OPEN", "OR", "ORI", "ORLY", "OSG", "OTIS", "OTLY", "OTTR", "OUST", "OXM", "OXY", "OZK", "PAAS", "PACB",
+"PAHC", "PARR", "PATH", "PAY", "PAYX", "PB", "PBR", "PCRX", "PDD", "PEG", "PEGA", "PENG", "PENN", "PEO", "PETS",
+"PFE", "PFLT", "PFSI", "PHIN", "PHR", "PII", "PINS", "PKX", "PLAB", "PLNT", "PLUG", "PLUS", "PMT", "PNR", "PNTG",
+"POR", "POST", "PPC", "PPL", "PR", "PRDO", "PRG", "PRGO", "PRGS", "PRIM", "PRKS", "PRLB", "PRTA", "PSKY", "PSN",
+"PSNL", "PTLO", "PTON", "PUMP", "PVH", "PYPL", "QDEL", "QGEN", "QRVO", "QS", "QTWO", "RAMP", "RAND", "RARE", "RAVE",
+"RBLX", "RCKT", "RCUS", "RDN", "RDNT", "RDWR", "RDY", "REG", "REPL", "REZI", "RF", "RFIL", "RGNX", "RGR", "RHI",
+"RICK", "RIO", "RITM", "RIVN", "RKT", "RLI", "RPRX", "RR", "RRR", "RTO", "RUN", "RWAY", "RYAAY", "SAFE", "SAH",
+"SAN", "SBCF", "SBGI", "SBLK", "SBRA", "SBS", "SBSW", "SCI", "SEI", "SEIC", "SEM", "SENS", "SF", "SFIX", "SFM",
+"SGHC", "SGI", "SHAK", "SHC", "SHEL", "SHIP", "SHOO", "SID", "SIGA", "SKM", "SKY", "SKYW", "SLB", "SLGN", "SLI",
+"SLM", "SLP", "SLRC", "SLVM", "SMCI", "SMG", "SMP", "SMPL", "SMR", "SNAP", "SNDR", "SNT", "SNY", "SO", "SOLV",
+"SON", "SONO", "SONY", "SPB", "SPCE", "SPOK", "SPSC", "SQM", "SRE", "SRG", "SRPT", "SRRK", "SSNC", "SSTK", "SSYS",
+"ST", "STAA", "STAG", "STG", "STLA", "STM", "STNE", "STWD", "SU", "SW", "SWBI", "SWK", "SWKS", "SWX", "SYF",
+"SYY", "T", "TAK", "TAP", "TBBK", "TBRG", "TCMD", "TDAY", "TDC", "TDOC", "TDS", "TDW", "TE", "TEAM", "TECH",
+"TECK", "TEN", "TENB", "TEVA", "TEX", "TFC", "TGS", "THO", "TKC", "TLK", "TLX", "TMHC", "TNL", "TPB", "TPC",
+"TREE", "TREX", "TRI", "TRIP", "TRMB", "TRN", "TROX", "TRP", "TS", "TSCO", "TSN", "TTC", "TTD", "TTE", "TTEK",
+"TX", "TXT", "U", "UAA", "UBER", "UBSI", "UCB", "UDR", "UFPI", "UGI", "UL", "ULH", "UNM", "UPBD", "UPST",
+"URBN", "URGN", "USAU", "USB", "USEA", "USNA", "UTG", "UVV", "VECO", "VERX", "VFC", "VHC", "VICI", "VIPS", "VIR",
+"VISN", "VIST", "VIV", "VLY", "VNDA", "VNET", "VNO", "VOD", "VRM", "VSAT", "VSTS", "VTR", "VTRS", "VTS", "VYX",
+"VZ", "W", "WAFD", "WAVE", "WB", "WBD", "WBS", "WD", "WDI", "WERN", "WFC", "WFRD", "WGO", "WHR", "WIX",
+"WKC", "WKHS", "WLK", "WLY", "WMB", "WMG", "WOLF", "WOR", "WPP", "WRB", "WTI", "WTRG", "WTTR", "WU", "WWW",
+"WY", "XEL", "XP", "XPEL", "XPEV", "XRAY", "XRX", "XYZ", "YETI", "YMM", "YPF", "YUMC", "Z", "ZBH", "ZD","ZION", "ZM", "ZTO", "ZTS"
+]
+
+print(f"Scanning {len(TICKERS)} tickers...")
+
+wyniki = {10: [], 20: [], 30: []}
+
+# =========================
+# BATCH SCAN
+# =========================
+for i in range(0, len(TICKERS), BATCH_SIZE):
+
+    batch = TICKERS[i:i+BATCH_SIZE]
+    print(f"Batch {i//BATCH_SIZE + 1}")
+
+    time.sleep(2)
+
+    data = yf.download(
+        batch,
+        period="5d",
+        interval="1m",
+        group_by="ticker",
+        threads=True,
+        progress=False,
+        session=session
+    )
+
+    # =========================
+    # PROCESS EACH TICKER
+    # =========================
+    for t in batch:
+
+        if t not in data.columns.levels[0]:
+            continue
+
+        df = data[t].dropna()
+
+        if len(df) < 30:
+            continue
+
+        # =========================
+        # TODAY FILTER (FIXED)
+        # =========================
+        df_today = df[df.index.date == df.index[-1].date()]
+
+        if len(df_today) < 10:
+            continue
+
+        curr = df_today.iloc[-1]
+
+        if curr["Close"] > MAX_PRICE:
+            continue
+
+        # =========================
+        # SAFE PREV CANDLE
+        # =========================
+        prev = df_today.iloc[-2]
+
+        # =========================
+        # FEATURES
+        # =========================
+        body = curr["Close"] - curr["Open"]
+        prev_body = prev["Close"] - prev["Open"]
+
+        candle_strength = body / curr["Open"] if curr["Open"] else 0
+        accel = body - prev_body
+        is_green = curr["Close"] > curr["Open"]
+
+        # =========================
+        # SESSION VOLUME (FIXED ROLLING NAN)
+        # =========================
+        session_avg_vol = df_today["Volume"].rolling(20).mean().iloc[-1]
+        if np.isnan(session_avg_vol) or session_avg_vol == 0:
+            continue
+
+        vol_ratio = curr["Volume"] / session_avg_vol
+
+        prev_close = prev["Close"]
+        rs = (curr["Close"] - prev_close) / prev_close * 100 if prev_close else 0
+
+        # =========================
+        # HISTORY VOLUME SPIKE
+        # =========================
+        df_prev = df[df.index.date < df.index[-1].date()]
+        max_hist_vol = df_prev["Volume"].max() if len(df_prev) > 0 else 0
+
+        hist_anomaly = curr["Volume"] > max_hist_vol if max_hist_vol > 0 else False
+
+        # =========================
+        # ORB SCAN
+        # =========================
+        for orb_mins, orb_time in ORB_ZAKRESY.items():
+
+            orb = df_today.between_time("09:30", orb_time)
+
+            if len(orb) < 3:
+                continue
+
+            or_high = orb["High"].max()
+
+            breakout = curr["Close"] > or_high
+
+            full_ignition = (
+                breakout and
+                vol_ratio > 1.5 and
+                rs > 0.3 and
+                accel > 0
+            )
+
+            early_ignition = (
+                not breakout and
+                is_green and
+                hist_anomaly and
+                accel > 0
+            )
+
+            score = rs * 3 + vol_ratio * 10 + candle_strength * 100 + accel * 50
+
+            if full_ignition or early_ignition:
+
+                wyniki[orb_mins].append({
+                    "Ticker": t,
+                    "Cena": round(curr["Close"], 2),
+                    "Signal": "ORB Breakout" if full_ignition else "Pre-Breakout",
+                    "Vol": round(vol_ratio, 2),
+                    "RS": round(rs, 2),
+                    "Score": round(score, 1)
+                })
+
+# =========================
+# OUTPUT
+# =========================
+print("\n" + "="*60)
+
+for k in [10, 20, 30]:
+    print(f"\nORB {k} min setups")
+
+    df_out = pd.DataFrame(wyniki[k])
+
+    if df_out.empty:
+        print("No signals")
+        continue
+
+    df_out = df_out.drop_duplicates("Ticker").sort_values("Score", ascending=False)
+    print(df_out.to_string(index=False))
