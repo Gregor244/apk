@@ -1,66 +1,502 @@
-TICKERS = ["AA", "AAL", "AAP", "AB", "ABM", "ABR", "ABT", "ACB", "ACGL", "ACHR", "ACIW", "ACM", "ACP", "AD", "ADC",
-"ADEA", "ADM", "ADNT", "ADTN", "AFRM", "AGIO", "AGNC", "AI", "AIG", "AIN", "AKBA", "ALC", "ALGM", "ALHC", "ALK",
-"ALKS", "ALM", "ALNT", "ALRM", "ALVO", "AMBA", "AMC", "AMCR", "AMCX", "AMKR", "AMPH", "AMRX", "AMRZ", "AMS", "AMSC",
-"AMX", "ANGO", "AORT", "AOS", "AOSL", "APA", "APAM", "APEI", "APLE", "APPS", "APTV", "AQN", "ARCC", "ARE", "ARI",
-"ARMK", "ARQQ", "ARQT", "ARWR", "ASAN", "ASC", "ASH", "ASIX", "ASM", "ASTS", "ASX", "ATEN", "ATHM", "ATKR", "ATRO",
-"AU", "AUB", "AVT", "AVTR", "AWR", "AX", "AXTA", "AZTA", "BABA", "BAC", "BAER", "BAK", "BALL", "BAND", "BATRK",
-"BAX", "BB", "BBAR", "BBVA", "BBW", "BBWI", "BBY", "BC", "BCC", "BEAM", "BEN", "BEPC", "BGS", "BHC", "BHF",
-"BHP", "BILI", "BILL", "BIRK", "BJ", "BJRI", "BKH", "BKR", "BKT", "BL", "BLDP", "BLND", "BLNK", "BMA", "BMBL",
-"BME", "BMRN", "BMY", "BN", "BNR", "BNTX", "BON", "BP", "BRBR", "BRKR", "BRO", "BROS", "BSAC", "BSX", "BTI",
-"BUD", "BWA", "BXMT", "BXP", "BYD", "BYND", "BZ", "BZH", "BZUN", "CAAP", "CAF", "CAG", "CAKE", "CALM", "CALX",
-"CALY", "CARG", "CARR", "CARS", "CBK", "CBRL", "CC", "CCC", "CCI", "CCL", "CCOI", "CCS", "CCSI", "CCU", "CDLX",
-"CE", "CELH", "CENT", "CENX", "CERS", "CEVA", "CFG", "CGC", "CGNX", "CHD", "CHDN", "CHEF", "CHGG", "CHWY", "CIB",
-"CL", "CLDX", "CLF", "CLNE", "CLW", "CLX", "CMBT", "CMC", "CMCSA", "CMG", "CMP", "CMPR", "CMPS", "CMS", "CNA",
-"CNC", "CNK", "CNMD", "CNO", "CNP", "CNR", "CNXC", "COHU", "COLB", "COLM", "COMP", "CON", "COO", "CORT", "CORZ",
-"COUR", "CPB", "CPRI", "CPRT", "CPS", "CRCT", "CRI", "CRK", "CRNC", "CRSP", "CRSR", "CRTO", "CRWV", "CSGP", "CSIQ",
-"CSR", "CSTL", "CSX", "CTMX", "CTRE", "CTSH", "CTVA", "CVE", "CVI", "CWEN", "CWK", "CWT", "CYD", "D", "DAL",
-"DAR", "DBX", "DCH", "DCI", "DDD", "DEA", "DEC", "DEI", "DEO", "DIN", "DINO", "DIS", "DK", "DKNG", "DLB",
-"DLX", "DNP", "DOCS", "DOCU", "DOW", "DOX", "DRD", "DSY", "DX", "DXC", "DXCM", "DYN", "EBF", "EBS", "EC",
-"EDIT", "EDRY", "EEFT", "EFC", "EGBN", "EHTH", "EIX", "EL", "ELAN", "ELE", "EMBJ", "EMN", "ENB", "ENO", "ENR",
-"ENTA", "ENVX", "EOSE", "EPAC", "EPAM", "EPC", "EPRT", "EQH", "EQNR", "EQR", "EQS", "EQT", "ERII", "ES", "ESI",
-"ESNT", "ESTA", "ESTC", "ETSY", "EVH", "EVO", "EW", "EXC", "EXE", "EXEL", "EXLS", "EXPO", "EXTR", "EYE", "EYPT",
-"EZPW", "F", "FAF", "FAST", "FATE", "FBIN", "FBK", "FC", "FCT", "FE", "FER", "FF", "FHI", "FIBK", "FIS",
-"FISI", "FISV", "FITB", "FIVN", "FIZZ", "FLO", "FLS", "FLWS", "FLYW", "FMC", "FND", "FNF", "FOR", "FOX", "FOXA",
-"FOXF", "FR", "FRA", "FRO", "FROG", "FRPT", "FSLY", "FTEK", "FTS", "FTV", "FUBO", "FUL", "FUTU", "FVRR", "FWONA",
-"FWONK", "G", "GAIN", "GAP", "GBDC", "GBX", "GDDY", "GDRX", "GDS", "GEF", "GEHC", "GEN", "GENI", "GERN", "GFI",
-"GFL", "GGB", "GGG", "GIB", "GIL", "GIS", "GLBE", "GLE", "GLO", "GLOB", "GLPI", "GM", "GMAB", "GMED", "GNTX",
-"GO", "GOLD", "GOOS", "GPCR", "GPK", "GPN", "GPRE", "GRAB", "GRAL", "GRBK", "GRF", "GRFS", "GRI", "GRND", "GRPN",
-"GSAT", "GSK", "GSL", "GTLB", "GTM", "GTN", "GXO", "GYRE", "HAIN", "HALO", "HAS", "HASI", "HCC", "HCSG", "HDB",
-"HE", "HELE", "HHH", "HIMS", "HIMX", "HIPO", "HLF", "HLN", "HLNE", "HMC", "HOG", "HOOD", "HP", "HPP", "HPQ",
-"HR", "HRB", "HRL", "HRTG", "HRTX", "HSBC", "HSIC", "HST", "HTLD", "HTO", "HUBG", "HUN", "HURN", "HUYA", "HXL",
-"HYLN", "HZO", "IAG", "IART", "IBN", "IBRX", "ICG", "IDR", "IFF", "III", "ILPT", "IMAX", "IMSR", "IMVT", "INFY",
-"ING", "INGR", "INMD", "INO", "INR", "INSP", "INVH", "IONS", "IOT", "IP", "IPI", "IQ", "IR", "IRDM", "ITP",
-"ITRI", "JACK", "JD", "JEF", "JKS", "JMIA", "JOYY", "KBH", "KBR", "KC", "KD", "KDP", "KELYA", "KEP", "KFY",
-"KHC", "KIDS", "KIM", "KMI", "KMT", "KMX", "KNSA", "KNX", "KO", "KR", "KRNT", "KSS", "KTN", "KTOS", "KVUE",
-"KYNB", "KZIA", "LAND", "LASR", "LAUR", "LBTYA", "LCID", "LCII", "LE", "LEDS", "LEG", "LEGN", "LEN", "LEVI", "LGIH",
-"LI", "LINC", "LIVN", "LKQ", "LMND", "LNC", "LNT", "LOB", "LOGI", "LOMA", "LPX", "LRE", "LRN", "LTBR", "LTC",
-"LUV", "LVS", "LYB", "LYFT", "LYG", "LZB", "M", "MAN", "MANU", "MARA", "MAS", "MATV", "MB", "MBIN", "MBLY",
-"MBUU", "MC", "MCHP", "MD", "MDLZ", "MDT", "MDU", "MDV", "MED", "MET", "MFC", "MFG", "MGA", "MGM", "MGNI",
-"MGPI", "MGY", "MICC", "MKC", "MLCO", "MLKN", "MMS", "MMSI", "MMT", "MMTX", "MMYT", "MNDY", "MNKD", "MNRO", "MNST",
-"MO", "MOMO", "MOS", "MP", "MPT", "MRNA", "MT", "MTCH", "MTG", "MTH", "MTX", "MUFG", "MWA", "MXL", "MYGN",
-"NATL", "NCLH", "NCNO", "NDAQ", "NDLS", "NE", "NEE", "NEM", "NEO", "NFE", "NFG", "NFLX", "NG", "NGG", "NGVC",
-"NHI", "NI", "NICE", "NIO", "NJR", "NKE", "NKTR", "NMIH", "NN", "NNN", "NNOX", "NOMD", "NOV", "NOW", "NRIM",
-"NRO", "NSP", "NTCT", "NTGR", "NTLA", "NTNX", "NTR", "NU", "NVAX", "NVCR", "NVO", "NVST", "NVTS", "NWBI", "NWG",
-"NWL", "NX", "NYT", "O", "OBDC", "OGN", "OHI", "OKE", "OKLO", "OLED", "OLLI", "OLN", "OLP", "OMC", "ON",
-"OPCH", "OPEN", "OR", "ORI", "ORLY", "OSG", "OTIS", "OTLY", "OTTR", "OUST", "OXM", "OXY", "OZK", "PAAS", "PACB",
-"PAHC", "PARR", "PATH", "PAY", "PAYX", "PB", "PBR", "PCRX", "PDD", "PEG", "PEGA", "PENG", "PENN", "PEO", "PETS",
-"PFE", "PFLT", "PFSI", "PHIN", "PHR", "PII", "PINS", "PKX", "PLAB", "PLNT", "PLUG", "PLUS", "PMT", "PNR", "PNTG",
-"POR", "POST", "PPC", "PPL", "PR", "PRDO", "PRG", "PRGO", "PRGS", "PRIM", "PRKS", "PRLB", "PRTA", "PSKY", "PSN",
-"PSNL", "PTLO", "PTON", "PUMP", "PVH", "PYPL", "QDEL", "QGEN", "QRVO", "QS", "QTWO", "RAMP", "RAND", "RARE", "RAVE",
-"RBLX", "RCKT", "RCUS", "RDN", "RDNT", "RDWR", "RDY", "REG", "REPL", "REZI", "RF", "RFIL", "RGNX", "RGR", "RHI",
-"RICK", "RIO", "RITM", "RIVN", "RKT", "RLI", "RPRX", "RR", "RRR", "RTO", "RUN", "RWAY", "RYAAY", "SAFE", "SAH",
-"SAN", "SBCF", "SBGI", "SBLK", "SBRA", "SBS", "SBSW", "SCI", "SEI", "SEIC", "SEM", "SENS", "SF", "SFIX", "SFM",
-"SGHC", "SGI", "SHAK", "SHC", "SHEL", "SHIP", "SHOO", "SID", "SIGA", "SKM", "SKY", "SKYW", "SLB", "SLGN", "SLI",
-"SLM", "SLP", "SLRC", "SLVM", "SMCI", "SMG", "SMP", "SMPL", "SMR", "SNAP", "SNDR", "SNT", "SNY", "SO", "SOLV",
-"SON", "SONO", "SONY", "SPB", "SPCE", "SPOK", "SPSC", "SQM", "SRE", "SRG", "SRPT", "SRRK", "SSNC", "SSTK", "SSYS",
-"ST", "STAA", "STAG", "STG", "STLA", "STM", "STNE", "STWD", "SU", "SW", "SWBI", "SWK", "SWKS", "SWX", "SYF",
-"SYY", "T", "TAK", "TAP", "TBBK", "TBRG", "TCMD", "TDAY", "TDC", "TDOC", "TDS", "TDW", "TE", "TEAM", "TECH",
-"TECK", "TEN", "TENB", "TEVA", "TEX", "TFC", "TGS", "THO", "TKC", "TLK", "TLX", "TMHC", "TNL", "TPB", "TPC",
-"TREE", "TREX", "TRI", "TRIP", "TRMB", "TRN", "TROX", "TRP", "TS", "TSCO", "TSN", "TTC", "TTD", "TTE", "TTEK",
-"TX", "TXT", "U", "UAA", "UBER", "UBSI", "UCB", "UDR", "UFPI", "UGI", "UL", "ULH", "UNM", "UPBD", "UPST",
-"URBN", "URGN", "USAU", "USB", "USEA", "USNA", "UTG", "UVV", "VECO", "VERX", "VFC", "VHC", "VICI", "VIPS", "VIR",
-"VISN", "VIST", "VIV", "VLY", "VNDA", "VNET", "VNO", "VOD", "VRM", "VSAT", "VSTS", "VTR", "VTRS", "VTS", "VYX",
-"VZ", "W", "WAFD", "WAVE", "WB", "WBD", "WBS", "WD", "WDI", "WERN", "WFC", "WFRD", "WGO", "WHR", "WIX",
-"WKC", "WKHS", "WLK", "WLY", "WMB", "WMG", "WOLF", "WOR", "WPP", "WRB", "WTI", "WTRG", "WTTR", "WU", "WWW",
-"WY", "XEL", "XP", "XPEL", "XPEV", "XRAY", "XRX", "XYZ", "YETI", "YMM", "YPF", "YUMC", "Z", "ZBH", "ZD","ZION", "ZM", "ZTO", "ZTS"
+import time
+import math
+import datetime as dt
+from collections import defaultdict
+from zoneinfo import ZoneInfo
+
+import pandas as pd
+import requests
+
+# =========================
+# CONFIG
+# =========================
+
+BASE_URL = "https://api.massive.com"
+API_KEY = "g1Q2nsHzqOY2JSJQIG_MdhTGAzffS1Gq"
+
+MIN_PRICE = 0.20
+MAX_PRICE = 25.0
+
+LOOKBACK_SESSIONS = 2
+TOP_INTRADAY_SCAN = 15
+
+MIN_INTERVAL = 12  # FREE SAFE LIMIT
+
+WARSAW = ZoneInfo("Europe/Warsaw")
+NEW_YORK = ZoneInfo("America/New_York")
+
+session = requests.Session()
+session.headers.update({"User-Agent": "Mozilla/5.0"})
+
+if API_KEY:
+    session.params.update({"apiKey": API_KEY})
+
+
+# =========================
+# HELPERS
+# =========================
+
+def as_float(v, default=None):
+    try:
+        return float(v) if v is not None else default
+    except:
+        return default
+
+
+LAST_CALL = 0
+
+
+def api_get(path, params=None):
+    global LAST_CALL
+
+    now = time.time()
+    wait = MIN_INTERVAL - (now - LAST_CALL)
+
+    if wait > 0:
+        time.sleep(wait)
+
+    url = f"{BASE_URL}{path}"
+    r = session.get(url, params=params or {}, timeout=30)
+    LAST_CALL = time.time()
+
+    if r.status_code == 429:
+        time.sleep(60)
+        return api_get(path, params)
+
+    if r.status_code >= 400:
+        raise RuntimeError(r.text)
+
+    return r.json()
+
+
+def parse_rows(payload):
+    if isinstance(payload, dict):
+        for k in ["results", "tickers", "data"]:
+            if isinstance(payload.get(k), list):
+                return payload[k]
+    return []
+
+
+def previous_weekdays(end_date, count):
+    out = []
+    d = end_date - dt.timedelta(days=1)
+    while len(out) < count:
+        if d.weekday() < 5:
+            out.append(d)
+        d -= dt.timedelta(days=1)
+    return out
+
+
+# =========================
+# HISTORY STATS
+# =========================
+
+def build_prev_session_stats(target_date, tickers):
+    history = defaultdict(list)
+
+    for day in previous_weekdays(target_date, LOOKBACK_SESSIONS):
+        payload = api_get(f"/v2/aggs/grouped/locale/us/market/stocks/{day}")
+        rows = parse_rows(payload)
+
+        for r in rows:
+            t = r.get("T")
+            if t in tickers:
+                history[t].append({
+                    "v": as_float(r.get("v")),
+                    "c": as_float(r.get("c"))
+                })
+
+    stats = {}
+
+    for t in tickers:
+        seq = history.get(t, [])
+        vols = [x["v"] for x in seq if x["v"]]
+
+        stats[t] = {
+            "avg_volume": sum(vols) / len(vols) if vols else None,
+            "last_close": seq[-1]["c"] if seq else None
+        }
+
+    return stats
+
+
+# =========================
+# PREFILTER + MOMENTUM v2
+# =========================
+
+def apply_historical_pre_filter(target_date, tickers, hist_stats):
+
+    payload = api_get(f"/v2/aggs/grouped/locale/us/market/stocks/{target_date}")
+    rows = parse_rows(payload)
+
+    state = {r["T"]: r for r in rows if r.get("T")}
+
+    out = []
+
+    for t in tickers:
+
+        hist = hist_stats.get(t, {})
+        avg_volume = hist.get("avg_volume")
+        prev_close = hist.get("last_close")
+
+        if not avg_volume or not prev_close:
+            continue
+
+        row = state.get(t)
+        if not row:
+            continue
+
+        price = as_float(row.get("c"))
+        open_price = as_float(row.get("o"))
+        volume = as_float(row.get("v"))
+
+        if not price or not open_price or not volume:
+            continue
+
+        if price < MIN_PRICE or price > MAX_PRICE:
+            continue
+
+        # =========================
+        # RVOL
+        # =========================
+        rvol = volume / max(avg_volume, 1)
+        if rvol < 0.7:
+            continue
+
+        change_pct = ((price - prev_close) / prev_close) * 100
+        candle_pct = ((price - open_price) / open_price) * 100
+
+        early_spike = (
+            (rvol >= 2) +
+            (candle_pct >= 5) +
+            (change_pct >= 8)
+        )
+
+        # =========================
+        # REAL MOMENTUM SCANNER v2
+        # =========================
+
+        flow = math.log1p(rvol) * 10
+
+        displacement = (
+            max(change_pct, 0) * 0.8 +
+            max(candle_pct, 0) * 0.8
+        )
+
+        breakout = (
+            (candle_pct > 3) * 2 +
+            (rvol > 2) * 2 +
+            (change_pct > 5) * 2
+        )
+
+        efficiency = abs(change_pct) / max(rvol, 0.1)
+        noise = abs(change_pct - candle_pct)
+        early_boost = early_spike * 3
+
+        score = (
+            flow +
+            displacement * 2 +
+            efficiency * 4 +
+            breakout * 3 +
+            early_boost -
+            noise * 0.5
+        )
+
+        out.append({
+            "ticker": t,
+            "score": round(score, 2),
+            "rvol": round(rvol, 2),
+            "change": round(change_pct, 2),
+            "candle": round(candle_pct, 2),
+            "early": early_spike
+        })
+
+    if not out:
+        return []
+
+    df = pd.DataFrame(out)
+    df = df.sort_values(["score", "rvol"], ascending=False)
+
+    return df.head(TOP_INTRADAY_SCAN)["ticker"].tolist()
+
+
+# =========================
+# INTRADAY ANALYSIS
+# =========================
+
+def analyze_intraday(bars):
+
+    if not bars:
+        return None
+
+    vols = []
+    spike = False
+    early = False
+    max_spike = 0
+    red = 0
+    strong_red = False
+
+    for i, b in enumerate(bars):
+
+        o = as_float(b.get("o"))
+        c = as_float(b.get("c"))
+        v = as_float(b.get("v"))
+
+        if not o or not c or not v:
+            continue
+
+        vols.append(v)
+
+        avg = sum(vols[-15:]) / max(len(vols[-15:]), 1)
+        ratio = v / avg if avg else 0
+
+        max_spike = max(max_spike, ratio)
+
+        if ratio > 2.2:
+            spike = True
+            if i < 45:
+                early = True
+
+        if c < o:
+            red += 1
+        else:
+            red = 0
+
+        if red >= 5:
+            strong_red = True
+
+    return {
+        "spike": spike,
+        "early": early,
+        "max_spike": max_spike,
+        "strong_red": strong_red
+    }
+
+
+# =========================
+# MAIN SCAN
+# =========================
+
+def run_scan(target_date, target_time, tickers):
+
+    hist = build_prev_session_stats(target_date, tickers)
+    filtered = apply_historical_pre_filter(target_date, tickers, hist)
+
+    local_dt = dt.datetime.combine(target_date, target_time, tzinfo=WARSAW)
+    et_dt = local_dt.astimezone(NEW_YORK)
+    session_open = et_dt.replace(hour=9, minute=30, second=0, microsecond=0)
+
+    results = []
+
+    for t in filtered:
+
+        try:
+            payload = api_get(
+                f"/v2/aggs/ticker/{t}/range/1/minute/"
+                f"{int(session_open.timestamp()*1000)}/"
+                f"{int(et_dt.timestamp()*1000)}",
+                {"adjusted": "true", "sort": "asc"}
+            )
+            bars = parse_rows(payload)
+        except:
+            continue
+
+        analysis = analyze_intraday(bars)
+        if not analysis:
+            continue
+
+        score = 0
+        if analysis["spike"]:
+            score += 8
+        if analysis["early"]:
+            score += 6
+
+        score += analysis["max_spike"] * 5
+
+        results.append({
+            "ticker": t,
+            "score": round(score, 2),
+            "max_spike": round(analysis["max_spike"], 2),
+            "early": analysis["early"]
+        })
+
+    df = pd.DataFrame(results)
+
+    if df.empty:
+        return df
+
+    return df.sort_values("score", ascending=False)
+
+
+# =========================
+# ENTRY
+# =========================
+
+if __name__ == "__main__":
+
+    date_input = input("DATE YYYY-MM-DD: ")
+    time_input = input("TIME HH:MM: ")
+
+    target_date = dt.datetime.strptime(date_input, "%Y-%m-%d").date()
+    hh, mm = map(int, time_input.split(":"))
+    target_time = dt.time(hh, mm)
+
+    TICKERS = [
+"A","AA","AAL","AAP","AAPL","AB","ABBV","ABG","ABM","ABNB",
+"ABR","ABT","ACA","ACB","ACGL","ACHR","ACIW","ACLS","ACM","ACN",
+"ACP","AD","ADBE","ADC","ADEA","ADI","ADM","ADNT","ADP","ADSK",
+"ADTN","AEE","AEM","AEP","AER","AFG","AFL","AFRM","AGCO","AGIO",
+"AGL","AGNC","AGX","AGYS","AI","AIG","AIN","AIR","AIT","AIZ",
+"AJG","AKAM","AKBA","ALB","ALC","ALGM","ALGN","ALGT","ALHC","ALK",
+"ALKS","ALL","ALLE","ALM","ALNT","ALNY","ALRM","ALSN","ALV","ALVO",
+"AMAT","AMBA","AMC","AMCR","AMCX","AMD","AME","AMG","AMGN","AMKR",
+"AMP","AMPH","AMR","AMRX","AMRZ","AMS","AMSC","AMT","AMX","AMZN",
+"AN","ANGO","AON","AORT","AOS","AOSL","APA","APAM","APD","APEI",
+"APH","APLE","APO","APP","APPS","APTV","AQN","ARCB","ARCC","ARE",
+"ARES","ARGX","ARI","ARM","ARMK","ARQQ","ARQT","ARW","ARWR","ASAN",
+"ASC","ASH","ASIX","ASM","ASML","ASTS","ASX","ATEN","ATHM","ATKR",
+"ATO","ATR","ATRO","AU","AUB","AVAV","AVB","AVGO","AVT","AVTR",
+"AVY","AWI","AWR","AX","AXP","AXTA","AYI","AZN","AZO","AZTA",
+"BA","BABA","BAC","BAER","BAK","BALL","BAND","BAP","BATRK","BAX",
+"BB","BBAR","BBVA","BBW","BBWI","BBY","BC","BCC","BDX","BE",
+"BEAM","BEN","BEPC","BFH","BG","BGS","BHC","BHF","BHP","BIDU",
+"BIIB","BILI","BILL","BIO","BIRK","BJ","BJRI","BKH","BKNG","BKR",
+"BKT","BL","BLD","BLDP","BLK","BLND","BLNK","BMA","BMBL","BME",
+"BMI","BMO","BMRN","BMY","BN","BNR","BNTX","BON","BOOT","BP",
+"BPOP","BR","BRBR","BRKR","BRO","BROS","BSAC","BSX","BTI","BUD",
+"BURL","BWA","BWXT","BXMT","BXP","BYD","BYND","BZ","BZH","BZUN",
+"C","CAAP","CACC","CACI","CAF","CAG","CAH","CAKE","CALM","CALX",
+"CALY","CAR","CARG","CARR","CARS","CASY","CAT","CB","CBK","CBOE",
+"CBRE","CBRL","CC","CCC","CCEP","CCI","CCK","CCL","CCOI","CCS",
+"CCSI","CCU","CDLX","CDNS","CE","CEG","CELH","CENT","CENX","CERS",
+"CEVA","CF","CFG","CFR","CGC","CGNX","CHD","CHDN","CHEF","CHGG",
+"CHKP","CHRD","CHRW","CHTR","CHWY","CI","CIB","CIEN","CINF","CL",
+"CLDX","CLF","CLH","CLNE","CLW","CLX","CM","CMBT","CMC","CMCSA",
+"CME","CMG","CMI","CMP","CMPR","CMPS","CMS","CNA","CNC","CNI",
+"CNK","CNMD","CNO","CNP","CNR","CNXC","COF","COHR","COHU","COIN",
+"COKE","COLB","COLM","COMP","CON","COO","COP","CORT","CORZ","COST",
+"COUR","CPA","CPAY","CPB","CPRI","CPRT","CPS","CPT","CRCT","CRI",
+"CRK","CRL","CRM","CRNC","CROX","CRS","CRSP","CRSR","CRTO","CRWV",
+"CSCO","CSGP","CSIQ","CSL","CSR","CSTL","CSW","CSX","CTAS","CTMX",
+"CTRE","CTSH","CTVA","CVCO","CVE","CVI","CVLT","CVS","CVSA","CVX",
+"CW","CWEN","CWK","CWT","CYD","D","DAL","DAR","DASH","DBX",
+"DCH","DCI","DD","DDD","DDS","DE","DEA","DEC","DECK","DEI",
+"DELL","DEO","DG","DGX","DHI","DHR","DIN","DINO","DIS","DK",
+"DKNG","DKS","DLB","DLR","DLTR","DLX","DNP","DOCS","DOCU","DOV",
+"DOW","DOX","DPZ","DRD","DRI","DSY","DTE","DUK","DVA","DX",
+"DXC","DXCM","DXPE","DY","DYN","EA","EAT","EBAY","EBF","EBS",
+"EC","ECG","ECL","ED","EDIT","EDRY","EEFT","EFC","EFX","EGBN",
+"EGP","EHTH","EIX","EL","ELAN","ELE","ELV","EMBJ","EME","EMN",
+"EMR","ENB","ENO","ENR","ENS","ENSG","ENTA","ENVA","ENVX","EOG",
+"EOSE","EPAC","EPAM","EPC","EPRT","EQH","EQIX","EQNR","EQR","EQS",
+"EQT","ERII","ES","ESE","ESI","ESLT","ESNT","ESS","ESTA","ESTC",
+"ETN","ETR","ETSY","EVH","EVO","EVR","EW","EWBC","EXC","EXE",
+"EXEL","EXLS","EXP","EXPD","EXPE","EXPO","EXR","EXTR","EYE","EYPT",
+"EZPW","F","FAF","FANG","FAST","FATE","FBIN","FBK","FC","FCNCA",
+"FCT","FDS","FDX","FE","FER","FERG","FF","FFIV","FHI","FIBK",
+"FICO","FIS","FISI","FISV","FITB","FIVE","FIVN","FIX","FIZZ","FLO",
+"FLS","FLWS","FLYW","FMC","FMX","FN","FND","FNF","FNV","FOR",
+"FORM","FOX","FOXA","FOXF","FR","FRA","FRO","FROG","FRPT","FRT",
+"FSLR","FSLY","FSS","FTEK","FTNT","FTS","FTV","FUBO","FUL","FUTU",
+"FVRR","FWONA","FWONK","G","GAIN","GAP","GBDC","GBX","GD","GDDY",
+"GDRX","GDS","GEF","GEHC","GEN","GENI","GERN","GEV","GFI","GFL",
+"GGB","GGG","GH","GHC","GHM","GIB","GIL","GILD","GIS","GKOS",
+"GL","GLBE","GLE","GLO","GLOB","GLPI","GLW","GM","GMAB","GMED",
+"GNTX","GO","GOLD","GOLF","GOOG","GOOGL","GOOS","GPC","GPCR","GPI",
+"GPK","GPN","GPRE","GRAB","GRAL","GRBK","GRF","GRFS","GRI","GRMN",
+"GRND","GRPN","GS","GSAT","GSK","GSL","GTLB","GTLS","GTM","GTN",
+"GWW","GXO","GYRE","H","HAIN","HALO","HAS","HASI","HCA","HCC",
+"HCI","HCSG","HD","HDB","HE","HEI","HELE","HHH","HIG","HII",
+"HIMS","HIMX","HIPO","HLF","HLN","HLNE","HLT","HMC","HOG","HON",
+"HOOD","HP","HPP","HPQ","HR","HRB","HRI","HRL","HRTG","HRTX",
+"HSBC","HSIC","HST","HSY","HTLD","HTO","HUBG","HUBS","HUM","HUN",
+"HURN","HUYA","HWKN","HXL","HYLN","HZO","IAG","IART","IBM","IBN",
+"IBRX","ICE","ICG","ICLR","IDCC","IDR","IDXX","IESC","IEX","IFF",
+"III","ILMN","ILPT","IMAX","IMSR","IMVT","INCY","INFY","ING","INGR",
+"INMD","INO","INR","INSM","INSP","INTC","INTU","INVH","IONS","IOT",
+"IP","IPAR","IPGP","IPI","IQ","IR","IRDM","IRM","IRTC","ISRG",
+"IT","ITP","ITRI","ITW","J","JACK","JBHT","JBL","JBTM","JD",
+"JEF","JKHY","JKS","JLL","JMIA","JNJ","JOYY","JPM","JXN","KALU",
+"KBH","KBR","KC","KD","KDP","KELYA","KEP","KEX","KFY","KHC",
+"KIDS","KIM","KLAC","KLIC","KMB","KMI","KMT","KMX","KNSA","KNSL",
+"KNX","KO","KOF","KR","KRNT","KRYS","KSS","KTN","KTOS","KVUE",
+"KWR","KYNB","KZIA","L","LAD","LAMR","LAND","LASR","LAUR","LBTYA",
+"LCID","LCII","LDOS","LE","LEA","LECO","LEDS","LEG","LEGN","LEN",
+"LEVI","LFUS","LGIH","LH","LI","LII","LIN","LINC","LITE","LIVN",
+"LKQ","LLY","LLYVK","LMND","LMT","LNC","LNG","LNT","LNTH","LOB",
+"LOGI","LOMA","LOPE","LOW","LPLA","LPX","LRCX","LRE","LRN","LSTR",
+"LTBR","LTC","LULU","LUV","LVS","LYB","LYFT","LYG","LYV","LZB",
+"M","MA","MAA","MAN","MANH","MANU","MAR","MARA","MAS","MATV",
+"MATX","MB","MBIN","MBLY","MBUU","MC","MCD","MCHP","MCK","MCO",
+"MD","MDB","MDLZ","MDT","MDU","MDV","MED","MEDP","MELI","MET",
+"META","MFC","MFG","MGA","MGM","MGNI","MGPI","MGY","MHK","MICC",
+"MKC","MKL","MKTX","MLCO","MLI","MLKN","MLM","MMM","MMS","MMSI",
+"MMT","MMTX","MMYT","MNDY","MNKD","MNRO","MNST","MO","MOD","MOH",
+"MOMO","MORN","MOS","MP","MPC","MPT","MPWR","MRCY","MRK","MRNA",
+"MRSH","MRVL","MS","MSCI","MSFT","MSGS","MSI","MSM","MT","MTB",
+"MTCH","MTD","MTG","MTH","MTN","MTRN","MTSI","MTX","MTZ","MU",
+"MUFG","MWA","MXL","MYGN","MYRG","NATL","NBIS","NBIX","NCLH","NCNO",
+"NDAQ","NDLS","NDSN","NE","NEE","NEM","NEO","NFE","NFG","NFLX",
+"NG","NGG","NGVC","NHI","NI","NICE","NIO","NJR","NKE","NKTR",
+"NMIH","NN","NNN","NNOX","NOC","NOMD","NOV","NOW","NRG","NRIM",
+"NRO","NSC","NSP","NTAP","NTCT","NTES","NTGR","NTLA","NTNX","NTR",
+"NTRA","NTRS","NU","NUE","NVAX","NVCR","NVDA","NVMI","NVO","NVR",
+"NVS","NVST","NVT","NVTS","NWBI","NWG","NWL","NX","NXPI","NXST",
+"NXT","NYT","O","OBDC","OC","ODFL","OGN","OHI","OKE","OKLO",
+"OKTA","OLED","OLLI","OLN","OLP","OMC","ON","ONTO","OPCH","OPEN",
+"OR","ORA","ORCL","ORI","ORLY","OSG","OSIS","OSK","OTIS","OTLY",
+"OTTR","OUST","OXM","OXY","OZK","PAAS","PAC","PACB","PAG","PAHC",
+"PANW","PARR","PATH","PAY","PAYC","PAYX","PB","PBR","PCAR","PCRX",
+"PCTY","PDD","PEG","PEGA","PEN","PENG","PENN","PEO","PEP","PETS",
+"PFE","PFG","PFGC","PFLT","PFSI","PG","PGR","PH","PHIN","PHM",
+"PHR","PI","PII","PINS","PKG","PKX","PLAB","PLD","PLMR","PLNT",
+"PLTR","PLUG","PLUS","PLXS","PM","PMT","PNC","PNFP","PNR","PNTG",
+"PNW","PODD","POR","POST","PPC","PPG","PPL","PR","PRDO","PRG",
+"PRGO","PRGS","PRIM","PRKS","PRLB","PRTA","PRU","PSA","PSKY","PSN",
+"PSNL","PSX","PTLO","PTON","PUMP","PVH","PWR","PYPL","QCOM","QDEL",
+"QGEN","QLYS","QRVO","QS","QTWO","R","RACE","RAMP","RAND","RARE",
+"RAVE","RBLX","RCKT","RCL","RCUS","RDDT","RDN","RDNT","RDWR","RDY",
+"REG","REGN","REPL","REZI","RF","RFIL","RGA","RGEN","RGLD","RGNX",
+"RGR","RH","RHI","RHP","RICK","RIO","RITM","RIVN","RJF","RKT",
+"RL","RLI","RMBS","RMD","RNR","ROG","ROK","ROKU","ROP","ROST",
+"RPM","RPRX","RR","RRR","RS","RSG","RTO","RTX","RUN","RVMD",
+"RVTY","RWAY","RY","RYAAY","RYTM","SAFE","SAH","SAIC","SAM","SAN",
+"SAP","SBAC","SBCF","SBGI","SBLK","SBRA","SBS","SBSW","SBUX","SCCO",
+"SCI","SEI","SEIC","SEM","SENS","SF","SFIX","SFM","SGHC","SGI",
+"SHAK","SHC","SHEL","SHIP","SHOO","SHOP","SHW","SID","SIGA","SIMO",
+"SITE","SJM","SKM","SKY","SKYW","SLB","SLGN","SLI","SLM","SLP",
+"SLRC","SLVM","SMCI","SMG","SMP","SMPL","SMR","SN","SNA","SNAP",
+"SNDK","SNDR","SNEX","SNOW","SNPS","SNT","SNX","SNY","SO","SOLV",
+"SON","SONO","SONY","SPB","SPCE","SPG","SPGI","SPOK","SPOT","SPSC",
+"SPXC","SQM","SRE","SRG","SRPT","SRRK","SSB","SSNC","SSTK","SSYS",
+"ST","STAA","STAG","STE","STG","STLA","STLD","STM","STNE","STT",
+"STWD","STX","STZ","SU","SW","SWBI","SWK","SWKS","SWX","SYF",
+"SYK","SYNA","SYY","T","TAK","TAP","TBBK","TBRG","TCMD","TD",
+"TDAY","TDC","TDG","TDOC","TDS","TDW","TDY","TE","TEAM","TECH",
+"TECK","TEL","TEN","TENB","TER","TEVA","TEX","TFC","TFX","TGS",
+"TGT","THC","THG","THO","TJX","TKC","TKO","TKR","TLK","TLX",
+"TM","TMHC","TMO","TMUS","TNL","TOL","TPB","TPC","TPR","TREE",
+"TREX","TRI","TRIP","TRMB","TRN","TROW","TROX","TRP","TRV","TS",
+"TSCO","TSEM","TSLA","TSM","TSN","TT","TTC","TTD","TTE","TTEK",
+"TTWO","TWLO","TX","TXN","TXRH","TXT","TYL","U","UAA","UAL",
+"UBER","UBSI","UCB","UCTT","UDR","UFPI","UGI","UHS","UI","UL",
+"ULH","ULTA","UNF","UNH","UNM","UNM","UNP","UPBD","UPS","UPST","URBN",
+"URGN","URI","USAU","USB","USEA","USNA","UTG","UTHR","UVV","V",
+"VAC","VC","VECO","VEEV","VERX","VFC","VHC","VICI","VICR","VIPS",
+"VIR","VISN","VIST","VIV","VLO","VLY","VMC","VNDA","VNET","VNO",
+"VOD","VPG","VRM","VRSK","VRSN","VRTX","VSAT","VSEC","VSTS","VTR",
+"VTRS","VTS","VYX","VZ","W","WAB","WAFD","WAT","WAVE","WB",
+"WBD","WBS","WCC","WCN","WD","WDAY","WDC","WDFC","WDI","WEC",
+"WERN","WFC","WFRD","WGO","WHR","WIX","WKC","WKHS","WLK","WLY",
+"WM","WMB","WMG","WMT","WOLF","WOR","WPM","WPP","WRB","WSM",
+"WST","WTI","WTRG","WTS","WTTR","WU","WWD","WWW","WY","WYNN",
+"XEL","XOM","XP","XPEL","XPEV","XRAY","XRX","XYL","XYZ","YETI",
+"YMM","YPF","YUM","YUMC","Z","ZBH","ZBRA","ZD","ZION","ZM",
+"ZS","ZTO","ZTS","EVAX","VRDN","VRAX",
 ]
+
+
+    df = run_scan(target_date, target_time, TICKERS)
+
+    print("\nRESULTS")
+    print(df.to_string(index=False))
