@@ -1,0 +1,1419 @@
+# =========================
+# PRO SCANNER v3.0
+# =========================
+
+import os
+import json
+import time
+import math
+import random
+import sqlite3
+import datetime as dt
+from collections import defaultdict
+from zoneinfo import ZoneInfo
+
+import numpy as np
+import pandas as pd
+import requests
+
+# =========================
+# CONFIG
+# =========================
+
+API_KEY = "PKOCPAEYJMYE7DOVDWX676BTMV"
+API_SECRET = "73p5TC3sA4c7f47cUjqVniJ5q1jR9tQnEvfBjWae7WNV"
+
+if not API_KEY or not API_SECRET:
+    raise RuntimeError("Missing Alpaca API credentials")
+
+BASE_URL = "https://data.alpaca.markets/v2"
+NY = ZoneInfo("America/New_York")
+
+MIN_PRICE = 0.20
+MAX_PRICE = 25.0
+
+LOOKBACK_SESSIONS = 3
+TOP_SCAN = 20
+
+REQUEST_SLEEP = 0.12
+DB_FILE = "scanner_history.db"
+
+# =========================
+# FINNHUB CONFIG
+# =========================
+FINNHUB_KEY = "d82t3s1r01ql4onfbbngd82t3s1r01ql4onfbbo0"
+FINNHUB_URL = "https://finnhub.io/api/v1"
+
+FLOAT_CACHE_FILE = "float_cache.json"
+SECTOR_CACHE_FILE = "sector_cache.json"
+
+# =========================
+# SESSION
+# =========================
+
+session = requests.Session()
+session.headers.update({
+    "APCA-API-KEY-ID": API_KEY,
+    "APCA-API-SECRET-KEY": API_SECRET
+})
+
+# =========================
+# CACHE HELPERS
+# =========================
+
+def load_json_cache(path):
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_json_cache(path, data):
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f)
+    except:
+        pass
+
+# =========================
+# GLOBAL INITIALIZATION
+# =========================
+
+FLOAT_MAP = load_json_cache(FLOAT_CACHE_FILE)
+SECTOR_MAP = load_json_cache(SECTOR_CACHE_FILE)
+
+# =========================
+# NEWS KEYWORDS
+# =========================
+
+BULLISH_NEWS = [
+    "partnership", "contract", "acquisition", "fda", "approval", 
+    "ai", "quantum", "guidance raised", "buyback", "profit", 
+    "record revenue", "breakthrough", "launch"
+]
+
+BEARISH_NEWS = [
+    "offering", "dilution", "bankruptcy", "fraud", 
+    "investigation", "downgrade", "missed earnings", "guidance cut"
+]
+
+# =========================
+# DB INIT
+# =========================
+
+conn = sqlite3.connect(DB_FILE)
+cursor = conn.cursor()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS scans (
+    ticker TEXT,
+    date TEXT,
+    score REAL,
+    breakout_probability REAL,
+    continuation_probability REAL,
+    result REAL
+)
+""")
+conn.commit()
+
+# =========================
+# HELPERS
+# =========================
+
+def as_float(v):
+    try:
+        return float(v)
+    except:
+        return None
+
+def clamp(v, low, high):
+    return max(low, min(v, high))
+
+def sigmoid(x):
+    try:
+        return 1 / (1 + math.exp(-x))
+    except:
+        return 0.5
+
+def parse_bar_time(ts):
+    try:
+        if not ts:
+            return None
+        return dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(NY)
+    except:
+        return None
+
+def chunked(lst, size):
+    for i in range(0, len(lst), size):
+        yield lst[i:i + size]
+
+# =========================
+# TIME OF DAY RVOL
+# =========================
+
+def time_of_day_rvol(current_volume, avg_daily_volume, minutes_elapsed):
+    session_minutes = 390
+    fraction = minutes_elapsed / session_minutes
+    expected_fraction = 0.12 * math.sqrt(max(fraction, 0.01))
+    expected_volume = avg_daily_volume * expected_fraction
+    return current_volume / max(expected_volume, 1)
+
+# =========================
+# FLOAT ROTATION
+# =========================
+
+def float_rotation_score(ticker, volume):
+    fl = FLOAT_MAP.get(ticker)
+    if not fl:
+        return 0
+    rotation = volume / max(fl * 1_000_000, 1)
+    if rotation >= 10:
+        return 35
+    if rotation >= 5:
+        return 25
+    if rotation >= 2:
+        return 15
+    return rotation * 5
+
+# =========================
+# SPREAD FILTER
+# =========================
+
+def spread_score(bars):
+    spreads = []
+    for b in bars[-10:]:
+        h = as_float(b.get("h"))
+        l = as_float(b.get("l"))
+        c = as_float(b.get("c"))
+        if not h or not l or not c:
+            continue
+        spread = ((h - l) / max(c, 0.01)) * 100
+        spreads.append(spread)
+    if not spreads:
+        return -10
+    avg_spread = sum(spreads) / len(spreads)
+    if avg_spread > 5:
+        return -15
+    if avg_spread > 3:
+        return -8
+    if avg_spread < 1:
+        return 5
+    return 0
+
+# =========================
+# PREMARKET HOD RECLAIM
+# =========================
+
+def premarket_hod_reclaim(bars):
+    premarket_high = 0
+    for b in bars:
+        ts = b.get("t")
+        if not ts:
+            continue
+        ts = dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(NY)
+        if ts.hour < 9 or (ts.hour == 9 and ts.minute < 30):
+            h = as_float(b.get("h"))
+            if h:
+                premarket_high = max(premarket_high, h)
+    if premarket_high == 0:
+        return 0
+    current = as_float(bars[-1].get("c"))
+    if not current:
+        return 0
+    distance = ((premarket_high - current) / current) * 100
+    if current > premarket_high:
+        return 25
+    if distance < 1:
+        return 15
+    if distance < 2:
+        return 8
+    return 0
+
+# =========================
+# RELATIVE STRENGTH
+# =========================
+
+def relative_strength_score(bars, spy_bars):
+    if not bars or not spy_bars:
+        return 0
+    s0 = as_float(bars[0].get("o"))
+    s1 = as_float(bars[-1].get("c"))
+    spy0 = as_float(spy_bars[0].get("o"))
+    spy1 = as_float(spy_bars[-1].get("c"))
+    if not all([s0, s1, spy0, spy1]):
+        return 0
+    stock_move = ((s1 - s0) / s0) * 100
+    spy_move = ((spy1 - spy0) / spy0) * 100
+    relative = stock_move - spy_move
+    return relative * 2
+
+# =========================
+# VOLATILITY COMPRESSION
+# =========================
+
+def volatility_compression_score(bars):
+    if len(bars) < 30:
+        return 0
+    ranges = []
+    for b in bars[-30:]:
+        h = as_float(b.get("h"))
+        l = as_float(b.get("l"))
+        c = as_float(b.get("c"))
+        if not h or not l or not c:
+            continue
+        r = ((h - l) / max(c, 0.01)) * 100
+        ranges.append(r)
+    if not ranges:
+        return 0
+    recent = sum(ranges[-5:]) / 5
+    older = sum(ranges[:20]) / 20
+    if recent < older * 0.5:
+        return 20
+    if recent < older * 0.7:
+        return 10
+    return 0
+
+# =========================
+# LIQUIDITY SWEEP
+# =========================
+
+def liquidity_sweep_score(bars):
+    if len(bars) < 10:
+        return 0
+    lows = []
+    for b in bars[-10:-1]:
+        l = as_float(b.get("l"))
+        if l:
+            lows.append(l)
+    if not lows:
+        return 0
+    prior_low = min(lows)
+    last = bars[-1]
+    last_low = as_float(last.get("l"))
+    last_close = as_float(last.get("c"))
+    if not last_low or not last_close:
+        return 0
+    if last_low < prior_low and last_close > prior_low:
+        return 15
+    return 0
+
+def liquidity_sweep_detector(bars):
+    if len(bars) < 10:
+        return 0
+    sweeps = 0
+    for b in bars[-10:]:
+        o = as_float(b.get("o"))
+        h = as_float(b.get("h"))
+        l = as_float(b.get("l"))
+        c = as_float(b.get("c"))
+        if not all([o, h, l, c]):
+            continue
+        lower_wick = min(o, c) - l
+        body = abs(c - o)
+        if lower_wick > body * 2:
+            sweeps += 1
+    return sweeps * 3
+
+
+
+# =========================
+# API CONNECTIONS
+# =========================
+
+def api_get(endpoint, params=None):
+    url = f"{BASE_URL}{endpoint}"
+    r = session.get(url, params=params, timeout=30)
+    if r.status_code == 401:
+        raise RuntimeError("401 Unauthorized")
+    if r.status_code == 429:
+        time.sleep(3)
+    if r.status_code >= 400:
+        raise RuntimeError(r.text)
+    time.sleep(REQUEST_SLEEP)
+    return r.json()
+
+def get_stock_bars(symbols, timeframe, start_iso, end_iso):
+    all_bars = {}
+    for chunk in chunked(symbols, 150):
+        joined = ",".join(chunk)
+        try:
+            data = api_get("/stocks/bars", {
+                "symbols": joined,
+                "timeframe": timeframe,
+                "start": start_iso,
+                "end": end_iso,
+                "feed": "iex",
+                "adjustment": "raw",
+                "limit": 10000
+            })
+        except:
+            data = api_get("/stocks/bars", {
+                "symbols": joined,
+                "timeframe": timeframe,
+                "start": start_iso,
+                "end": end_iso,
+                "feed": "delayed_sip",
+                "adjustment": "raw",
+                "limit": 10000
+            })
+        bars = data.get("bars", {})
+        all_bars.update(bars)
+    return all_bars
+
+# =========================
+# FINNHUB FETCH
+# =========================
+
+def finnhub_get(endpoint, params=None):
+    if params is None:
+        params = {}
+    params["token"] = FINNHUB_KEY
+    url = FINNHUB_URL + endpoint
+    r = requests.get(url, params=params, timeout=20)
+    if r.status_code >= 400:
+        return None
+    try:
+        return r.json()
+    except:
+        return None
+
+def get_float_and_sector(ticker):
+    if ticker in FLOAT_MAP and ticker in SECTOR_MAP:
+        return
+    try:
+        data = finnhub_get("/stock/profile2", {"symbol": ticker})
+        if not data:
+            return
+        shares = data.get("shareOutstanding")
+        if shares:
+            FLOAT_MAP[ticker] = float(shares)
+        sector = data.get("finnhubIndustry") or "UNKNOWN"
+        SECTOR_MAP[ticker] = sector
+    except:
+        pass
+
+def build_float_sector_cache(tickers):
+    print("\nBUILDING FLOAT / SECTOR CACHE...")
+    updated = 0
+    for i, ticker in enumerate(tickers):
+        if ticker in FLOAT_MAP and ticker in SECTOR_MAP:
+            continue
+        get_float_and_sector(ticker)
+        updated += 1
+        time.sleep(0.25)
+        if i % 25 == 0:
+            print(f"CACHE {i}/{len(tickers)}")
+    save_json_cache(FLOAT_CACHE_FILE, FLOAT_MAP)
+    save_json_cache(SECTOR_CACHE_FILE, SECTOR_MAP)
+    print(f"\nCACHE DONE ({updated} updated)")
+
+def get_upcoming_earnings(tickers_list):
+    """
+    Pobiera wyniki finansowe na dziś i jutro z Finnhub,
+    filtruje po liście TICKERS i dołącza statystyki spółki.
+    """
+    # Używamy strefy ET (Nowy Jork) dla spójności kalendarza giełdowego
+    today = dt.datetime.now(NY).date()
+    tomorrow = today + dt.timedelta(days=1)
+    
+    start_date = today.strftime('%Y-%m-%d')
+    end_date = tomorrow.strftime('%Y-%m-%d')
+    
+    print(f"\n📡 POBIERANIE WYNIKÓW FINANSOWYCH ({start_date} do {end_date})...")
+    
+    # Endpoint Finnhub
+    params = {"from": start_date, "to": end_date}
+    
+    try:
+        data = finnhub_get("/calendar/earnings", params)
+    except Exception as e:
+        print(f"⚠️ Błąd pobierania kalendarza wyników: {e}")
+        return []
+
+    earnings_list = []
+    
+    if data and "earningsCalendar" in data:
+        for item in data["earningsCalendar"]:
+            ticker = item.get("symbol")
+            
+            # Filtrujemy tylko spółki, które skanujesz, aby odsiać śmieci
+            if ticker in tickers_list:
+                date = item.get("date")
+                eps_est = item.get("epsEstimate")
+                rev_est = item.get("revenueEstimate")
+                
+                # Pobranie danych strukturalnych z lokalnego cache
+                float_shares = FLOAT_MAP.get(ticker, 0)
+                sector = SECTOR_MAP.get(ticker, "UNKNOWN")
+                
+                earnings_list.append({
+                    "ticker": ticker,
+                    "date": date,
+                    "eps_est": eps_est if eps_est else 0.0,
+                    "rev_est": rev_est if rev_est else 0,
+                    "float": float_shares,
+                    "sector": sector
+                })
+                
+    return earnings_list
+# =========================
+# MARKET REGIME
+# =========================
+
+def market_regime():
+    now = dt.datetime.now(NY)
+    h = now.hour
+    if 9 <= h < 11:
+        return "MOMENTUM"
+    if 11 <= h < 14:
+        return "CHOP"
+    return "POWER"
+
+# =========================
+# FLOAT SCORING
+# =========================
+
+def float_score(ticker):
+    fl = FLOAT_MAP.get(ticker)
+    if not fl:
+        return 0
+    if fl < 5:
+        return 35
+    if fl < 10:
+        return 25
+    if fl < 20:
+        return 18
+    if fl < 50:
+        return 10
+    if fl < 100:
+        return 5
+    return -5
+
+# =========================
+# NEWS NLP
+# =========================
+
+def news_nlp_score(ticker):
+    score = 0
+    fake_news = random.choice(["ai partnership", "contract", "guidance raised", "offering", "none"])
+    txt = fake_news.lower()
+    for w in BULLISH_NEWS:
+        if w in txt:
+            score += 8
+    for w in BEARISH_NEWS:
+        if w in txt:
+            score -= 10
+    return score
+
+# =========================
+# SECTOR SYMPATHY
+# =========================
+
+def sector_sympathy_score(ticker, movers):
+    sector = SECTOR_MAP.get(ticker)
+    if not sector:
+        return 0
+    same_sector = 0
+    for other in movers:
+        if other == ticker:
+            continue
+        other_sector = SECTOR_MAP.get(other)
+        if other_sector == sector:
+            same_sector += 1
+    return same_sector * 4
+
+# =========================
+# DARK POOL PROXY
+# =========================
+
+def dark_pool_proxy(bars):
+    if len(bars) < 20:
+        return {"score": 0, "hidden_buying": False}
+    tight = 0
+    holds = 0
+    for b in bars[-20:]:
+        o = as_float(b.get("o"))
+        h = as_float(b.get("h"))
+        l = as_float(b.get("l"))
+        c = as_float(b.get("c"))
+        v = as_float(b.get("v"))
+        if not all([o, h, l, c, v]):
+            continue
+        rng = (h - l) / max(c, 0.01)
+        if v > 50000 and rng < 0.015:
+            tight += 1
+        if c >= o * 0.998:
+            holds += 1
+    score = tight * 2 + holds
+    return {"score": round(score, 2), "hidden_buying": (tight >= 5)}
+
+# =========================
+# MORNING RUNNER
+# =========================
+
+def morning_runner_detector(bars):
+    pre = []
+    for b in bars:
+        ts = parse_bar_time(b.get("t"))
+        if not ts:
+            continue
+        if dt.time(5, 0) <= ts.time() < dt.time(9, 30):
+            pre.append(b)
+    if len(pre) < 5:
+        return {"runner": False, "score": 0}
+    total_vol = 0
+    greens = 0
+    first = None
+    last = None
+    for i, b in enumerate(pre):
+        o = as_float(b.get("o"))
+        c = as_float(b.get("c"))
+        v = as_float(b.get("v"))
+        if not all([o, c, v]):
+            continue
+        total_vol += v
+        if c > o:
+            greens += 1
+        if i == 0:
+            first = c
+        last = c
+    if not first or not last:
+        return {"runner": False, "score": 0}
+    move = ((last - first) / max(first, 0.01)) * 100
+    score = greens * 0.8 + move * 1.5
+    if total_vol > 1000000:
+        score += 15
+    return {"runner": score >= 20, "score": round(score, 2)}
+
+# =========================
+# LIGHT PREFILTER
+# =========================
+
+def prefilter(target_date, target_time, tickers, spy_bars=None):
+    local_dt = dt.datetime.combine(target_date, target_time, tzinfo=NY)
+    start_dt = local_dt.replace(hour=5, minute=0, second=0, microsecond=0)
+
+
+
+    intraday = get_stock_bars(tickers, "1Min", start_dt.isoformat(), local_dt.isoformat())
+    candidates = []
+
+    for ticker, bars in intraday.items():
+        if not bars:
+            continue
+        first = as_float(bars[0].get("o"))
+        last = as_float(bars[-1].get("c"))
+        if not first or not last:
+            continue
+        if last < MIN_PRICE or last > MAX_PRICE:
+            continue
+
+        total_volume = sum([as_float(b.get("v")) or 0 for b in bars])
+        if total_volume < 200000:
+            continue
+
+        move_pct = ((last - first) / max(first, 0.01)) * 100
+        rvol = total_volume / 1000000
+
+        greens = 0
+        for b in bars[-30:]:
+            o = as_float(b.get("o"))
+            c = as_float(b.get("c"))
+            if o and c and c > o:
+                greens += 1
+
+        highs = [as_float(b.get("h")) for b in bars[-20:] if as_float(b.get("h"))]
+        lows = [as_float(b.get("l")) for b in bars[-20:] if as_float(b.get("l"))]
+        if not highs or not lows:
+            continue
+
+        compression = (max(highs) - min(lows)) / max(last, 0.01)
+        score = 0
+
+        # Core Original Factors
+        score += max(move_pct, 0) * 2
+        score += greens * 0.7
+        score += rvol * 6
+
+        if compression < 0.03:
+            score += 12
+
+        morning = morning_runner_detector(bars)
+        score += morning["score"] * 0.5
+
+        recent_high = max(highs)
+        distance = ((recent_high - last) / max(last, 0.01)) * 100
+        if distance < 2:
+            score += 15
+
+        # New Institutional Momentum Filters (codess.docx)
+        minutes_elapsed = ((target_time.hour * 60 + target_time.minute) - (9 * 60 + 30))
+        minutes_elapsed = max(minutes_elapsed, 1)
+        tod_rvol = time_of_day_rvol(total_volume, 1000000, minutes_elapsed)
+        score += tod_rvol * 8
+
+        score += float_rotation_score(ticker, total_volume)
+        score += spread_score(bars)
+        score += premarket_hod_reclaim(bars)
+        
+        if spy_bars is not None:
+            score += relative_strength_score(bars, spy_bars)
+            
+        score += volatility_compression_score(bars)
+        score += liquidity_sweep_score(bars)
+        score += float_score(ticker)
+        score += sector_sympathy_score(ticker, tickers)
+
+        candidates.append({
+            "ticker": ticker,
+            "score": round(score, 2),
+            "move_pct": round(move_pct, 2),
+            "rvol": round(rvol, 2),
+            "compression": round(compression, 4)
+        })
+
+    if not candidates:
+        return []
+
+    df = pd.DataFrame(candidates)
+    df = df.sort_values(["score", "rvol"], ascending=False)
+
+    print("\n🔥 PREFILTER")
+    print(df.head(25).to_string(index=False))
+    return df.head(25)["ticker"].tolist()
+
+# =========================
+# INTRADAY ANALYSIS
+# =========================
+
+def analyze_intraday(bars):
+    if len(bars) < 20:
+        return None
+    vols = []
+    closes = []
+    highs = []
+    lows = []
+    cumulative_pv = 0
+    cumulative_vol = 0
+    spike = False
+    early_spike = False
+    strong_red = False
+    max_spike = 0
+    red_streak = 0
+    late_vol = 0
+    total_vol = 0
+
+    for i, b in enumerate(bars):
+        o = as_float(b.get("o"))
+        h = as_float(b.get("h"))
+        l = as_float(b.get("l"))
+        c = as_float(b.get("c"))
+        v = as_float(b.get("v"))
+        if not all([o, h, l, c, v]):
+            continue
+        vols.append(v)
+        closes.append(c)
+        highs.append(h)
+        lows.append(l)
+        total_vol += v
+
+        typical = (h + l + c) / 3
+        cumulative_pv += (typical * v)
+        cumulative_vol += v
+        vwap = cumulative_pv / cumulative_vol
+
+        avg_vol = sum(vols[-15:]) / max(len(vols[-15:]), 1)
+        ratio = v / avg_vol if avg_vol else 0
+        max_spike = max(max_spike, ratio)
+
+        if ratio > 2.5:
+            spike = True
+            if i < 45:
+                early_spike = True
+        if c < o:
+            red_streak += 1
+        else:
+            red_streak = 0
+        if red_streak >= 5:
+            strong_red = True
+        if i >= len(bars) * 0.7:
+            late_vol += v
+
+    day_high = max(highs)
+    day_low = min(lows)
+    final_close = closes[-1]
+    first_close = closes[0]
+    day_range = max(day_high - day_low, 0.01)
+
+    close_strength = (final_close - day_low) / day_range
+    trend_pct = ((final_close - first_close) / max(first_close, 0.01)) * 100
+    late_vol_ratio = late_vol / max(total_vol, 1)
+    vwap_extension = ((final_close - vwap) / max(vwap, 0.01)) * 100
+    dump_ratio = (day_high - final_close) / day_range
+    recent_high = max(highs[-20:])
+    breakout_proximity = ((recent_high - final_close) / max(final_close, 0.01)) * 100
+    compression = (max(highs[-10:]) - min(lows[-10:])) / max(final_close, 0.01)
+
+    pre_breakout = (
+        breakout_proximity < 2
+        and compression < 0.03
+        and close_strength > 0.7
+        and trend_pct > 2
+    )
+    relative_strength = close_strength * max(trend_pct, 0)
+
+    return {
+        "spike": spike, "early_spike": early_spike, "strong_red": strong_red,
+        "max_spike": round(max_spike, 2), "close_strength": round(close_strength, 2),
+        "trend_pct": round(trend_pct, 2), "late_vol_ratio": round(late_vol_ratio, 2),
+        "vwap_extension": round(vwap_extension, 2), "dump_ratio": round(dump_ratio, 2),
+        "pre_breakout": pre_breakout, "breakout_proximity": round(breakout_proximity, 2),
+        "compression": round(compression, 4), "relative_strength": round(relative_strength, 2)
+    }
+
+# =========================
+# ML MODEL
+# =========================
+
+def ml_probability_model(ticker, analysis, dp, morning, sector_score, news_score, sweep_score, rvol, bars):
+    score = 0
+    score += (analysis["max_spike"] * 5)
+    score += (analysis["close_strength"] * 25)
+    score += (max(analysis["trend_pct"], 0) * 2)
+    score += spread_score(bars)
+    score += (analysis["late_vol_ratio"] * 22)
+    score += (max(analysis["vwap_extension"], 0) * 4)
+
+    if analysis["pre_breakout"]:
+        score += 18
+
+    score += (max(0, 2 - analysis["breakout_proximity"]) * 4)
+    score += (max(0, 1 - analysis["compression"]) * 10)
+    score += (morning["score"] * 0.7)
+    score += dp["score"]
+    score += float_score(ticker)
+    score += sector_score
+    score += news_score
+    score += sweep_score
+    score += rvol * 4
+
+    if dp["hidden_buying"]:
+        score += 12
+
+    score -= (analysis["dump_ratio"] * 25)
+    if analysis["strong_red"]:
+        score -= 20
+
+    regime = market_regime()
+    if regime == "MOMENTUM":
+        score *= 1.15
+    elif regime == "POWER":
+        score *= 1.08
+    elif regime == "CHOP":
+        score *= 0.85
+
+    breakout_prob = sigmoid((score - 55) / 10) * 100
+    continuation_prob = sigmoid((score - 65) / 10) * 100
+    fail_prob = 100 - breakout_prob
+
+    return {
+        "score": round(score, 2),
+        "breakout_probability": round(breakout_prob, 2),
+        "continuation_probability": round(continuation_prob, 2),
+        "fail_probability": round(fail_prob, 2)
+    }
+
+# =========================
+# MAIN SCAN
+# =========================
+
+def run_scan(date_str, time_str, tickers):
+    target_date = dt.datetime.strptime(date_str, "%Y-%m-%d").date()
+    hh, mm = map(int, time_str.split(":"))
+    target_time = dt.time(hh, mm)
+
+    local_dt = dt.datetime.combine(target_date, target_time, tzinfo=NY)
+    start_dt = local_dt.replace(hour=5, minute=0, second=0, microsecond=0)
+
+    # SPY Data Retrieval
+    try:
+        spy_bars_dict = get_stock_bars(["SPY"], "1Min", start_dt.isoformat(), local_dt.isoformat())
+        spy_bars = spy_bars_dict.get("SPY", [])
+    except:
+        spy_bars = []
+
+    # Prefilter Execution
+    filtered = prefilter(target_date, target_time, tickers, spy_bars)
+    if not filtered:
+        print("\nNO PREFILTER MATCHES")
+        return pd.DataFrame()
+
+    intraday = get_stock_bars(filtered, "1Min", start_dt.isoformat(), local_dt.isoformat())
+    results = []
+    leaders = {}
+
+    for ticker in filtered:
+        bars = intraday.get(ticker, [])
+        if not bars:
+            continue
+        first = as_float(bars[0].get("c"))
+        last = as_float(bars[-1].get("c"))
+        if first and last:
+            leaders[ticker] = ((last - first) / first) * 100
+
+    for ticker, bars in intraday.items():
+        if not bars:
+            continue
+        last_price = as_float(bars[-1].get("c"))
+        if not last_price or last_price < MIN_PRICE or last_price > MAX_PRICE:
+            continue
+
+        analysis = analyze_intraday(bars)
+        if not analysis:
+            continue
+
+        total_vol = sum([as_float(b.get("v")) or 0 for b in bars])
+        rvol = total_vol / 1000000
+
+        dp = dark_pool_proxy(bars)
+        morning = morning_runner_detector(bars)
+        news_score = news_nlp_score(ticker)
+        sector_score = sector_sympathy_score(ticker, leaders)
+        sweep_score = liquidity_sweep_detector(bars)
+
+        ml = ml_probability_model(
+            ticker, analysis, dp, morning, sector_score, news_score, sweep_score, rvol, bars
+        )
+
+        results.append({
+            "ticker": ticker, "price": round(last_price, 2), "ml_score": ml["score"],
+            "breakout": ml["breakout_probability"], "continuation": ml["continuation_probability"],
+            "fail": ml["fail_probability"], "runner": morning["runner"], "pre_bo": analysis["pre_breakout"],
+            "hidden_buy": dp["hidden_buying"], "trend": analysis["trend_pct"], "rvol": round(rvol, 2),
+            "sector": round(sector_score, 2), "news": round(news_score, 2)
+        })
+
+    df = pd.DataFrame(results)
+    if df.empty:
+        return df
+    return df.sort_values(["breakout", "continuation", "ml_score"], ascending=False)
+
+# =========================
+# PRETTY PRINT
+# =========================
+
+def print_results(df):
+    if df.empty:
+        print("\nNO RESULTS\n")
+        return
+
+    print("\n" + "=" * 90)
+    print("🔥 TOP BREAKOUT CANDIDATES")
+    print("=" * 90)
+    print(df.head(5)[[
+        "ticker", "price", "breakout", "continuation", "ml_score", 
+        "trend", "rvol", "runner", "pre_bo", "hidden_buy"
+    ]].to_string(index=False))
+
+    print("\n" + "=" * 90)
+    print("⚡ PRE-BREAKOUT SETUPS")
+    print("=" * 90)
+    pre = df[df["pre_bo"] == True].head(5)
+    if pre.empty:
+        print("No strong pre-breakout setups")
+    else:
+        print(pre[["ticker", "breakout", "continuation", "trend", "rvol", "sector", "news"]].to_string(index=False))
+
+
+# =========================================================
+# PROFESSIONAL PRE-EARNINGS RADAR v4.0
+# ZASTĄP STARE print_earnings_radar()
+# =========================================================
+
+from tabulate import tabulate
+from colorama import Fore, Style, init
+
+init(autoreset=True)
+
+# =========================================================
+# MOCK INSTITUTIONAL DATA
+# (Później podmień na API)
+# =========================================================
+
+def mock_iv_rank():
+    return round(random.uniform(20, 100), 2)
+
+def mock_expected_move():
+    return round(random.uniform(3, 15), 2)
+
+def mock_short_interest():
+    return round(random.uniform(1, 25), 2)
+
+def mock_days_to_cover():
+    return round(random.uniform(0.5, 12), 2)
+
+def mock_beat_rate():
+    return random.randint(45, 95)
+
+def mock_avg_earnings_move():
+    return round(random.uniform(2, 14), 2)
+
+def mock_revision():
+    return random.choice([
+        "UP",
+        "DOWN",
+        "FLAT"
+    ])
+
+def mock_options_flow():
+    return random.choice([
+        "BULLISH CALL FLOW",
+        "AGGRESSIVE SWEEPS",
+        "PUT HEDGE",
+        "NEUTRAL",
+        "INSTITUTIONAL BUYING"
+    ])
+
+# =========================================================
+# SQUEEZE SCORE
+# =========================================================
+
+def squeeze_score(short_interest, float_size):
+
+    score = 0
+
+    if short_interest > 25:
+        score += 30
+
+    elif short_interest > 15:
+        score += 20
+
+    elif short_interest > 8:
+        score += 10
+
+    if float_size < 20:
+        score += 20
+
+    elif float_size < 50:
+        score += 10
+
+    return score
+
+# =========================================================
+# EARNINGS SCORE ENGINE
+# =========================================================
+
+def earnings_score(stock):
+
+    score = 0
+
+    # IV RANK
+    if stock["iv_rank"] > 80:
+        score += 20
+
+    elif stock["iv_rank"] > 60:
+        score += 12
+
+    elif stock["iv_rank"] > 40:
+        score += 6
+
+    # SHORT INTEREST
+    if stock["short_interest"] > 20:
+        score += 20
+
+    elif stock["short_interest"] > 10:
+        score += 10
+
+    # BEAT RATE
+    if stock["beat_rate"] > 80:
+        score += 18
+
+    elif stock["beat_rate"] > 65:
+        score += 10
+
+    # EXPECTED MOVE
+    if stock["expected_move"] > 10:
+        score += 18
+
+    elif stock["expected_move"] > 7:
+        score += 10
+
+    elif stock["expected_move"] > 5:
+        score += 5
+
+    # FLOAT
+    if stock["float"] < 20:
+        score += 18
+
+    elif stock["float"] < 50:
+        score += 10
+
+    # REVISIONS
+    if stock["revision"] == "UP":
+        score += 15
+
+    elif stock["revision"] == "DOWN":
+        score -= 10
+
+    # OPTIONS FLOW
+    flow = stock["options_flow"]
+
+    if "CALL" in flow:
+        score += 15
+
+    if "SWEEPS" in flow:
+        score += 12
+
+    if "BUYING" in flow:
+        score += 10
+
+    # AVG MOVE
+    if stock["avg_move"] > 10:
+        score += 15
+
+    elif stock["avg_move"] > 6:
+        score += 8
+
+    # SQUEEZE
+    score += squeeze_score(
+        stock["short_interest"],
+        stock["float"]
+    )
+
+    return round(min(score, 100), 2)
+
+# =========================================================
+# SETUP GRADE
+# =========================================================
+
+def setup_grade(score):
+
+    if score >= 90:
+        return "A+"
+
+    elif score >= 75:
+        return "A"
+
+    elif score >= 60:
+        return "B"
+
+    elif score >= 45:
+        return "C"
+
+    return "D"
+
+# =========================================================
+# COLOR FORMAT
+# =========================================================
+
+def color_grade(g):
+
+    if g == "A+":
+        return Fore.GREEN + g + Style.RESET_ALL
+
+    if g == "A":
+        return Fore.LIGHTGREEN_EX + g + Style.RESET_ALL
+
+    if g == "B":
+        return Fore.YELLOW + g + Style.RESET_ALL
+
+    if g == "C":
+        return Fore.LIGHTRED_EX + g + Style.RESET_ALL
+
+    return Fore.RED + g + Style.RESET_ALL
+
+# =========================================================
+# PROFESSIONAL PRE-EARNINGS RADAR
+# =========================================================
+
+def print_earnings_radar(earnings_list):
+
+    if not earnings_list:
+        print("\nNO EARNINGS DATA")
+        return
+
+    enhanced = []
+
+    for e in earnings_list:
+
+        stock = {
+            "ticker": e["ticker"],
+            "date": e["date"],
+            "eps_est": e["eps_est"],
+            "rev_est": round(e["rev_est"] / 1_000_000, 2),
+            "float": round(e["float"] / 1_000_000, 2),
+
+            # Institutional Metrics
+            "iv_rank": mock_iv_rank(),
+            "expected_move": mock_expected_move(),
+            "short_interest": mock_short_interest(),
+            "days_to_cover": mock_days_to_cover(),
+            "beat_rate": mock_beat_rate(),
+            "avg_move": mock_avg_earnings_move(),
+            "revision": mock_revision(),
+            "options_flow": mock_options_flow(),
+
+            "sector": e["sector"]
+        }
+
+        stock["earnings_score"] = earnings_score(stock)
+        stock["setup_grade"] = setup_grade(
+            stock["earnings_score"]
+        )
+
+        enhanced.append(stock)
+
+    df = pd.DataFrame(enhanced)
+
+    df = df.sort_values(
+        ["earnings_score", "iv_rank"],
+        ascending=False
+    )
+
+    df["setup_grade"] = df["setup_grade"].apply(color_grade)
+
+    print("\n")
+    print("=" * 220)
+    print("🔥 PROFESSIONAL PRE-EARNINGS RADAR")
+    print("=" * 220)
+
+    cols = [
+        "ticker",
+        "date",
+        "eps_est",
+        "rev_est",
+        "float",
+        "iv_rank",
+        "expected_move",
+        "short_interest",
+        "days_to_cover",
+        "beat_rate",
+        "avg_move",
+        "revision",
+        "options_flow",
+        "earnings_score",
+        "setup_grade"
+    ]
+
+    print(
+        tabulate(
+            df[cols],
+            headers="keys",
+            tablefmt="fancy_grid",
+            showindex=False
+        )
+    )
+
+    print("\n")
+    print("=" * 220)
+    print("🚀 TOP EARNINGS SETUPS")
+    print("=" * 220)
+
+    top = df.head(10)
+
+    for _, r in top.iterrows():
+
+        print(
+            f"{r['ticker']} | "
+            f"Score={r['earnings_score']} | "
+            f"IV={r['iv_rank']} | "
+            f"Short={r['short_interest']}% | "
+            f"Move={r['expected_move']}% | "
+            f"BeatRate={r['beat_rate']}% | "
+            f"Flow={r['options_flow']}"
+        )
+
+    print("\n")
+    print("=" * 220)
+    print("📌 LEGEND")
+    print("=" * 220)
+
+    print("IV Rank         = implied volatility vs 52w range")
+    print("Expected Move   = options implied earnings move")
+    print("Short Interest  = squeeze probability")
+    print("Days To Cover   = short pressure")
+    print("Beat Rate       = historical EPS beat frequency")
+    print("Avg Move        = historical post earnings move")
+    print("Revision        = analyst estimate revisions")
+    print("Options Flow    = institutional positioning")
+    print("Earnings Score  = composite breakout probability")
+    print("Setup Grade     = overall setup quality")
+
+
+
+# =========================
+# RUN ENGINE
+# =========================
+
+if __name__ == "__main__":
+    print("\n🔥 PRO SCANNER v3.0")
+    print("TIME = NEW YORK TIME (ET)")
+    print("AI + ML + PREMARKET ENGINE\n")
+
+
+    TICKERS = [
+        "A","AA","AAL","AAP","AAPL","AB","ABBV","ABG","ABM","ABNB",
+        "ABR","ABT","ACA","ACB","ACGL","ACHR","ACIW","ACLS","ACM","ACN",
+        "ACP","AD","ADBE","ADC","ADEA","ADI","ADM","ADNT","ADP","ADSK",
+        "ADTN","AEE","AEM","AEP","AER","AFG","AFL","AFRM","AGCO","AGIO",
+        "AGL","AGNC","AGX","AGYS","AI","AIG","AIN","AIR","AIT","AIZ",
+        "AJG","AKAM","AKBA","ALB","ALC","ALGM","ALGN","ALGT","ALHC","ALK",
+        "ALKS","ALL","ALLE","ALM","ALNT","ALNY","ALRM","ALSN","ALV","ALVO",
+        "AMAT","AMBA","AMC","AMCR","AMCX","AMD","AME","AMG","AMGN","AMKR",
+        "AMP","AMPH","AMR","AMRX","AMRZ","AMS","AMSC","AMT","AMX","AMZN",
+        "AN","ANGO","AON","AORT","AOS","AOSL","APA","APAM","APD","APEI",
+        "APH","APLE","APO","APP","APPS","APTV","AQN","ARCB","ARCC","ARE",
+        "ARES","ARGX","ARI","ARM","ARMK","ARQQ","ARQT","ARW","ARWR","ASAN",
+        "ASC","ASH","ASIX","ASM","ASML","ASTS","ASX","ATEN","ATHM","ATKR",
+        "ATO","ATR","ATRO","AU","AUB","AVAV","AVB","AVGO","AVT","AVTR",
+        "AVY","AWI","AWR","AX","AXP","AXTA","AYI","AZN","AZO","AZTA",
+        "BA","BABA","BAC","BAER","BAK","BALL","BAND","BAP","BATRK","BAX",
+        "BB","BBAR","BBVA","BBW","BBWI","BBY","BC","BCC","BDX","BE",
+        "BEAM","BEN","BEPC","BFH","BG","BGS","BHC","BHF","BHP","BIDU",
+        "BIIB","BILI","BILL","BIO","BIRK","BJ","BJRI","BKH","BKNG","BKR",
+        "BKT","BL","BLD","BLDP","BLK","BLND","BLNK","BMA","BMBL","BME",
+        "BMI","BMO","BMRN","BMY","BN","BNR","BNTX","BON","BOOT","BP",
+        "BPOP","BR","BRBR","BRKR","BRO","BROS","BSAC","BSX","BTI","BUD",
+        "BURL","BWA","BWXT","BXMT","BXP","BYD","BYND","BZ","BZH","BZUN",
+        "C","CAAP","CACC","CACI","CAF","CAG","CAH","CAKE","CALM","CALX",
+        "CALY","CAR","CARG","CARR","CARS","CASY","CAT","CB","CBK","CBOE",
+        "CBRE","CBRL","CC","CCC","CCEP","CCI","CCK","CCL","CCOI","CCS",
+        "CCSI","CCU","CDLX","CDNS","CE","CEG","CELH","CENT","CENX","CERS",
+        "CEVA","CF","CFG","CFR","CGC","CGNX","CHD","CHDN","CHEF","CHGG",
+        "CHKP","CHRD","CHRW","CHTR","CHWY","CI","CIB","CIEN","CINF","CL",
+        "CLDX","CLF","CLH","CLNE","CLW","CLX","CM","CMBT","CMC","CMCSA",
+        "CME","CMG","CMI","CMP","CMPR","CMPS","CMS","CNA","CNC","CNI",
+        "CNK","CNMD","CNO","CNP","CNR","CNXC","COF","COHR","COHU","COIN",
+        "COKE","COLB","COLM","COMP","CON","COO","COP","CORT","CORZ","COST",
+        "COUR","CPA","CPAY","CPB","CPRI","CPRT","CPS","CPT","CRCT","CRI",
+        "CRK","CRL","CRM","CRNC","CROX","CRS","CRSP","CRSR","CRTO","CRWV",
+        "CSCO","CSGP","CSIQ","CSL","CSR","CSTL","CSW","CSX","CTAS","CTMX",
+        "CTRE","CTSH","CTVA","CVCO","CVE","CVI","CVLT","CVS","CVSA","CVX",
+        "CW","CWEN","CWK","CWT","CYD","D","DAL","DAR","DASH","DBX",
+        "DCH","DCI","DD","DDD","DDS","DE","DEA","DEC","DECK","DEI",
+        "DELL","DEO","DG","DGX","DHI","DHR","DIN","DINO","DIS","DK",
+        "DKNG","DKS","DLB","DLR","DLTR","DLX","DNP","DOCS","DOCU","DOV",
+        "DOW","DOX","DPZ","DRD","DRI","DSY","DTE","DUK","DVA","DX",
+        "DXC","DXCM","DXPE","DY","DYN","EA","EAT","EBAY","EBF","EBS",
+        "EC","ECG","ECL","ED","EDIT","EDRY","EEFT","EFC","EFX","EGBN",
+        "EGP","EHTH","EIX","EL","ELAN","ELE","ELV","EMBJ","EME","EMN",
+        "EMR","ENB","ENO","ENR","ENS","ENSG","ENTA","ENVA","ENVX","EOG",
+        "EOSE","EPAC","EPAM","EPC","EPRT","EQH","EQIX","EQNR","EQR","EQS",
+        "EQT","ERII","ES","ESE","ESI","ESLT","ESNT","ESS","ESTA","ESTC",
+        "ETN","ETR","ETSY","EVH","EVO","EVR","EW","EWBC","EXC","EXE",
+        "EXEL","EXLS","EXP","EXPD","EXPE","EXPO","EXR","EXTR","EYE","EYPT",
+        "EZPW","F","FAF","FANG","FAST","FATE","FBIN","FBK","FC","FCNCA",
+        "FCT","FDS","FDX","FE","FER","FERG","FF","FFIV","FHI","FIBK",
+        "FICO","FIS","FISI","FISV","FITB","FIVE","FIVN","FIX","FIZZ","FLO",
+        "FLS","FLWS","FLYW","FMC","FMX","FN","FND","FNF","FNV","FOR",
+        "FORM","FOX","FOXA","FOXF","FR","FRA","FRO","FROG","FRPT","FRT",
+        "FSLR","FSLY","FSS","FTEK","FTNT","FTS","FTV","FUBO","FUL","FUTU",
+        "FVRR","FWONA","FWONK","G","GAIN","GAP","GBDC","GBX","GD","GDDY",
+        "GDRX","GDS","GEF","GEHC","GEN","GENI","GERN","GEV","GFI","GFL",
+        "GGB","GGG","GH","GHC","GHM","GIB","GIL","GILD","GIS","GKOS",
+        "GL","GLBE","GLE","GLO","GLOB","GLPI","GLW","GM","GMAB","GMED",
+        "GNTX","GO","GOLD","GOLF","GOOG","GOOGL","GOOS","GPC","GPCR","GPI",
+        "GPK","GPN","GPRE","GRAB","GRAL","GRBK","GRF","GRFS","GRI","GRMN",
+        "GRND","GRPN","GS","GSAT","GSK","GSL","GTLB","GTLS","GTM","GTN",
+        "GWW","GXO","GYRE","H","HAIN","HALO","HAS","HASI","HCA","HCC",
+        "HCI","HCSG","HD","HDB","HE","HEI","HELE","HHH","HIG","HII",
+        "HIMS","HIMX","HIPO","HLF","HLN","HLNE","HLT","HMC","HOG","HON",
+        "HOOD","HP","HPP","HPQ","HR","HRB","HRI","HRL","HRTG","HRTX",
+        "HSBC","HSIC","HST","HSY","HTLD","HTO","HUBG","HUBS","HUM","HUN",
+        "HURN","HUYA","HWKN","HXL","HYLN","HZO","IAG","IART","IBM","IBN",
+        "IBRX","ICE","ICG","ICLR","IDCC","IDR","IDXX","IESC","IEX","IFF",
+        "III","ILMN","ILPT","IMAX","IMSR","IMVT","INCY","INFY","ING","INGR",
+        "INMD","INO","INR","INSM","INSP","INTC","INTU","INVH","IONS","IOT",
+        "IP","IPAR","IPGP","IPI","IQ","IR","IRDM","IRM","IRTC","ISRG",
+        "IT","ITP","ITRI","ITW","J","JACK","JBHT","JBL","JBTM","JD",
+        "JEF","JKHY","JKS","JLL","JMIA","JNJ","JOYY","JPM","JXN","KALU",
+        "KBH","KBR","KC","KD","KDP","KELYA","KEP","KEX","KFY","KHC",
+        "KIDS","KIM","KLAC","KLIC","KMB","KMI","KMT","KMX","KNSA","KNSL",
+        "KNX","KO","KOF","KR","KRNT","KRYS","KSS","KTN","KTOS","KVUE",
+        "KWR","KYNB","KZIA","L","LAD","LAMR","LAND","LASR","LAUR","LBTYA",
+        "LCID","LCII","LDOS","LE","LEA","LECO","LEDS","LEG","LEGN","LEN",
+        "LEVI","LFUS","LGIH","LH","LI","LII","LIN","LINC","LITE","LIVN",
+        "LKQ","LLY","LLYVK","LMND","LMT","LNC","LNG","LNT","LNTH","LOB",
+        "LOGI","LOMA","LOPE","LOW","LPLA","LPX","LRCX","LRE","LRN","LSTR",
+        "LTBR","LTC","LULU","LUV","LVS","LYB","LYFT","LYG","LYV","LZB",
+        "M","MA","MAA","MAN","MANH","MANU","MAR","MARA","MAS","MATV",
+        "MATX","MB","MBIN","MBLY","MBUU","MC","MCD","MCHP","MCK","MCO",
+        "MD","MDB","MDLZ","MDT","MDU","MDV","MED","MEDP","MELI","MET",
+        "META","MFC","MFG","MGA","MGM","MGNI","MGPI","MGY","MHK","MICC",
+        "MKC","MKL","MKTX","MLCO","MLI","MLKN","MLM","MMM","MMS","MMSI",
+        "MMT","MMTX","MMYT","MNDY","MNKD","MNRO","MNST","MO","MOD","MOH",
+        "MOMO","MORN","MOS","MP","MPC","MPT","MPWR","MRCY","MRK","MRNA",
+        "MRSH","MRVL","MS","MSCI","MSFT","MSGS","MSI","MSM","MT","MTB",
+        "MTCH","MTD","MTG","MTH","MTN","MTRN","MTSI","MTX","MTZ","MU",
+        "MUFG","MWA","MXL","MYGN","MYRG","NATL","NBIS","NBIX","NCLH","NCNO",
+        "NDAQ","NDLS","NDSN","NE","NEE","NEM","NEO","NFE","NFG","NFLX",
+        "NG","NGG","NGVC","NHI","NI","NICE","NIO","NJR","NKE","NKTR",
+        "NMIH","NN","NNN","NNOX","NOC","NOMD","NOV","NOW","NRG","NRIM",
+        "NRO","NSC","NSP","NTAP","NTCT","NTES","NTGR","NTLA","NTNX","NTR",
+        "NTRA","NTRS","NU","NUE","NVAX","NVCR","NVDA","NVMI","NVO","NVR",
+        "NVS","NVST","NVT","NVTS","NWBI","NWG","NWL","NX","NXPI","NXST",
+        "NXT","NYT","O","OBDC","OC","ODFL","OGN","OHI","OKE","OKLO",
+        "OKTA","OLED","OLLI","OLN","OLP","OMC","ON","ONTO","OPCH","OPEN",
+        "OR","ORA","ORCL","ORI","ORLY","OSG","OSIS","OSK","OTIS","OTLY",
+        "OTTR","OUST","OXM","OXY","OZK","PAAS","PAC","PACB","PAG","PAHC",
+        "PANW","PARR","PATH","PAY","PAYC","PAYX","PB","PBR","PCAR","PCRX",
+        "PCTY","PDD","PEG","PEGA","PEN","PENG","PENN","PEO","PEP","PETS",
+        "PFE","PFG","PFGC","PFLT","PFSI","PG","PGR","PH","PHIN","PHM",
+        "PHR","PI","PII","PINS","PKG","PKX","PLAB","PLD","PLMR","PLNT",
+        "PLTR","PLUG","PLUS","PLXS","PM","PMT","PNC","PNFP","PNR","PNTG",
+        "PNW","PODD","POR","POST","PPC","PPG","PPL","PR","PRDO","PRG",
+        "PRGO","PRGS","PRIM","PRKS","PRLB","PRTA","PRU","PSA","PSKY","PSN",
+        "PSNL","PSX","PTLO","PTON","PUMP","PVH","PWR","PYPL","QCOM","QDEL",
+        "QGEN","QLYS","QRVO","QS","QTWO","R","RACE","RAMP","RAND","RARE",
+        "RAVE","RBLX","RCKT","RCL","RCUS","RDDT","RDN","RDNT","RDWR","RDY",
+        "REG","REGN","REPL","REZI","RF","RFIL","RGA","RGEN","RGLD","RGNX",
+        "RGR","RH","RHI","RHP","RICK","RIO","RITM","RIVN","RJF","RKT",
+        "RL","RLI","RMBS","RMD","RNR","ROG","ROK","ROKU","ROP","ROST",
+        "RPM","RPRX","RR","RRR","RS","RSG","RTO","RTX","RUN","RVMD",
+        "RVTY","RWAY","RY","RYAAY","RYTM","SAFE","SAH","SAIC","SAM","SAN",
+        "SAP","SBAC","SBCF","SBGI","SBLK","SBRA","SBS","SBSW","SBUX","SCCO",
+        "SCI","SEI","SEIC","SEM","SENS","SF","SFIX","SFM","SGHC","SGI",
+        "SHAK","SHC","SHEL","SHIP","SHOO","SHOP","SHW","SID","SIGA","SIMO",
+        "SITE","SJM","SKM","SKY","SKYW","SLB","SLGN","SLI","SLM","SLP",
+        "SLRC","SLVM","SMCI","SMG","SMP","SMPL","SMR","SN","SNA","SNAP",
+        "SNDK","SNDR","SNEX","SNOW","SNPS","SNT","SNX","SNY","SO","SOLV",
+        "SON","SONO","SONY","SPB","SPCE","SPG","SPGI","SPOK","SPOT","SPSC",
+        "SPXC","SQM","SRE","SRG","SRPT","SRRK","SSB","SSNC","SSTK","SSYS",
+        "ST","STAA","STAG","STE","STG","STLA","STLD","STM","STNE","STT",
+        "STWD","STX","STZ","SU","SW","SWBI","SWK","SWKS","SWX","SYF",
+        "SYK","SYNA","SYY","T","TAK","TAP","TBBK","TBRG","TCMD","TD",
+        "TDAY","TDC","TDG","TDOC","TDS","TDW","TDY","TE","TEAM","TECH",
+        "TECK","TEL","TEN","TENB","TER","TEVA","TEX","TFC","TFX","TGS",
+        "TGT","THC","THG","THO","TJX","TKC","TKO","TKR","TLK","TLX",
+        "TM","TMHC","TMO","TMUS","TNL","TOL","TPB","TPC","TPR","TREE",
+        "TREX","TRI","TRIP","TRMB","TRN","TROW","TROX","TRP","TRV","TS",
+        "TSCO","TSEM","TSLA","TSM","TSN","TT","TTC","TTD","TTE","TTEK",
+        "TTWO","TWLO","TX","TXN","TXRH","TXT","TYL","U","UAA","UAL",
+        "UBER","UBSI","UCB","UCTT","UDR","UFPI","UGI","UHS","UI","UL",
+        "ULH","ULTA","UNF","UNH","UNM","UNM","UNP","UPBD","UPS","UPST","URBN",
+        "URGN","URI","USAU","USB","USEA","USNA","UTG","UTHR","UVV","V",
+        "VAC","VC","VECO","VEEV","VERX","VFC","VHC","VICI","VICR","VIPS",
+        "VIR","VISN","VIST","VIV","VLO","VLY","VMC","VNDA","VNET","VNO",
+        "VOD","VPG","VRM","VRSK","VRSN","VRTX","VSAT","VSEC","VSTS","VTR",
+        "VTRS","VTS","VYX","VZ","W","WAB","WAFD","WAT","WAVE","WB",
+        "WBD","WBS","WCC","WCN","WD","WDAY","WDC","WDFC","WDI","WEC",
+        "WERN","WFC","WFRD","WGO","WHR","WIX","WKC","WKHS","WLK","WLY",
+        "WM","WMB","WMG","WMT","WOLF","WOR","WPM","WPM","WRB","WSM",
+        "WST","WTI","WTRG","WTS","WTTR","WU","WWD","WWW","WY","WYNN",
+        "XEL","XOM","XP","XPEL","XPEV","XRAY","XRX","XYL","XYZ","YETI",
+        "YMM","YPF","YUM","YUMC","Z","ZBH","ZBRA","ZD","ZION","ZM",
+        "ZS","ZTO","ZTS","EVAX","VRDN","VRAX","ABVX","AVAV","PRPO","UFI",
+    ]
+
+    # Dynamic Cache Verification / Finnhub Synchronization
+    build_float_sector_cache(TICKERS)
+
+    date_input = input("DATE (YYYY-MM-DD): ")
+    time_input = input("TIME (HH:MM): ")
+
+    df = run_scan(date_input, time_input, TICKERS)
+    print_results(df)
+
+    earnings_data = get_upcoming_earnings(TICKERS)
+    print_earnings_radar(earnings_data)
