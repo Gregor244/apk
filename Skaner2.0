@@ -39,6 +39,7 @@ REQUEST_SLEEP = 0.12
 DB_FILE = "scanner_history.db"
 
 ADV_CACHE = {}
+INTRADAY_RVOL_CACHE = {}
 
 # =========================
 # FINNHUB CONFIG
@@ -160,6 +161,104 @@ def time_of_day_rvol(current_volume, avg_daily_volume, minutes_elapsed):
     expected_fraction = 0.12 * math.sqrt(max(fraction, 0.01))
     expected_volume = avg_daily_volume * expected_fraction
     return current_volume / max(expected_volume, 1)
+
+def true_intraday_rvol(ticker, current_volume, target_dt, lookback_days=10):
+
+    cache_key = f"{ticker}_{target_dt.strftime('%H:%M')}"
+
+    if cache_key in INTRADAY_RVOL_CACHE:
+
+        avg_same_time_volume = INTRADAY_RVOL_CACHE[cache_key]
+
+        return current_volume / max(avg_same_time_volume, 1)
+
+    market_open = target_dt.replace(
+        hour=9,
+        minute=30,
+        second=0,
+        microsecond=0
+    )
+
+    minutes_elapsed = int(
+        (target_dt - market_open).total_seconds() / 60
+    )
+
+    if minutes_elapsed <= 0:
+        return 0
+
+    end_day = target_dt.replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
+
+    start_day = end_day - dt.timedelta(days=lookback_days * 3)
+
+    try:
+
+        data = api_get("/stocks/bars", {
+            "symbols": ticker,
+            "timeframe": "1Min",
+            "start": start_day.isoformat(),
+            "end": end_day.isoformat(),
+            "feed": "iex",
+            "adjustment": "raw",
+            "limit": 10000
+        })
+
+    except Exception as e:
+
+        print(f"RVOL ERROR {ticker}: {e}")
+
+        return 1.0
+
+    bars = data.get("bars", {}).get(ticker, [])
+
+    if not bars:
+        return 1.0
+
+    daily_cumulative = defaultdict(float)
+
+    for b in bars:
+
+        ts = parse_bar_time(b.get("t"))
+
+        if not ts:
+            continue
+
+        if ts.hour < 9 or (ts.hour == 9 and ts.minute < 30):
+            continue
+
+        session_minutes = int(
+            ((ts.hour * 60 + ts.minute) - (9 * 60 + 30))
+        )
+
+        if session_minutes > minutes_elapsed:
+            continue
+
+        volume = as_float(b.get("v"))
+
+        if not volume:
+            continue
+
+        day_key = ts.date()
+
+        daily_cumulative[day_key] += volume
+
+    cumulative_samples = list(daily_cumulative.values())
+
+    if len(cumulative_samples) < 3:
+        return 1.0
+
+    avg_same_time_volume = (
+        sum(cumulative_samples)
+        / len(cumulative_samples)
+    )
+
+    INTRADAY_RVOL_CACHE[cache_key] = avg_same_time_volume
+
+    return current_volume / max(avg_same_time_volume, 1)
 
 # =========================
 # FLOAT ROTATION
@@ -462,7 +561,7 @@ def get_upcoming_earnings(tickers_list):
     """
     # Używamy strefy ET (Nowy Jork) dla spójności kalendarza giełdowego
     today = dt.datetime.now(NY).date()
-    tomorrow = today + dt.timedelta(days=1)
+    tomorrow = today + dt.timedelta(days=2)
     
     start_date = today.strftime('%Y-%m-%d')
     end_date = tomorrow.strftime('%Y-%m-%d')
@@ -663,7 +762,11 @@ def prefilter(target_date, target_time, tickers, spy_bars=None):
         move_pct = ((last - first) / max(first, 0.01)) * 100
         avg_daily_volume = get_avg_daily_volume(ticker)
 
-        rvol = total_volume / max(avg_daily_volume, 1)
+        rvol = true_intraday_rvol(
+        ticker,
+        total_volume,
+        local_dt
+        )
 
         greens = 0
         
@@ -926,7 +1029,11 @@ def run_scan(date_str, time_str, tickers):
         total_vol = sum([as_float(b.get("v")) or 0 for b in bars])
         avg_daily_volume = get_avg_daily_volume(ticker)
 
-        rvol = total_vol / max(avg_daily_volume, 1)
+        rvol = true_intraday_rvol(
+        ticker,
+        total_vol,
+        local_dt
+        )
 
         dp = dark_pool_proxy(bars)
         morning = morning_runner_detector(bars)
@@ -1455,7 +1562,7 @@ if __name__ == "__main__":
         "WST","WTI","WTRG","WTS","WTTR","WU","WWD","WWW","WY","WYNN",
         "XEL","XOM","XP","XPEL","XPEV","XRAY","XRX","XYL","XYZ","YETI",
         "YMM","YPF","YUM","YUMC","Z","ZBH","ZBRA","ZD","ZION","ZM",
-        "ZS","ZTO","ZTS","EVAX","VRDN","VRAX","ABVX","AVAV","PRPO","UFI",
+        "ZS","ZTO","ZTS","EVAX","VRDN","VRAX","ABVX","PRPO","UFI",
     ]
 
     # Dynamic Cache Verification / Finnhub Synchronization
