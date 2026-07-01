@@ -33,10 +33,12 @@ MIN_PRICE = 0.20
 MAX_PRICE = 25.0
 
 LOOKBACK_SESSIONS = 3
-TOP_SCAN = 20
+TOP_SCAN = 75
 
 REQUEST_SLEEP = 0.12
 DB_FILE = "scanner_history.db"
+
+ADV_CACHE = {}
 
 # =========================
 # FINNHUB CONFIG
@@ -335,30 +337,24 @@ def api_get(endpoint, params=None):
 
 def get_stock_bars(symbols, timeframe, start_iso, end_iso):
     all_bars = {}
+
     for chunk in chunked(symbols, 150):
+
         joined = ",".join(chunk)
-        try:
-            data = api_get("/stocks/bars", {
-                "symbols": joined,
-                "timeframe": timeframe,
-                "start": start_iso,
-                "end": end_iso,
-                "feed": "iex",
-                "adjustment": "raw",
-                "limit": 10000
-            })
-        except:
-            data = api_get("/stocks/bars", {
-                "symbols": joined,
-                "timeframe": timeframe,
-                "start": start_iso,
-                "end": end_iso,
-                "feed": "delayed_sip",
-                "adjustment": "raw",
-                "limit": 10000
-            })
+
+        data = api_get("/stocks/bars", {
+            "symbols": joined,
+            "timeframe": timeframe,
+            "start": start_iso,
+            "end": end_iso,
+            "feed": "iex",
+            "adjustment": "raw",
+            "limit": 10000
+        })
+
         bars = data.get("bars", {})
         all_bars.update(bars)
+
     return all_bars
 
 # =========================
@@ -378,6 +374,57 @@ def finnhub_get(endpoint, params=None):
     except:
         return None
 
+def get_avg_daily_volume(ticker):
+
+    if ticker in ADV_CACHE:
+        return ADV_CACHE[ticker]
+
+    end_dt = dt.datetime.now(NY).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
+
+    start_dt = end_dt - dt.timedelta(days=90)
+
+    try:
+
+        data = api_get("/stocks/bars", {
+            "symbols": ticker,
+            "timeframe": "1Day",
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+            "feed": "iex",
+            "adjustment": "raw",
+            "limit": 20
+        })
+
+    except:
+        ADV_CACHE[ticker] = 1000000
+        return 1000000
+
+    bars = data.get("bars", {}).get(ticker, [])
+
+    vols = []
+
+    for b in bars[-20:]:
+
+        v = as_float(b.get("v"))
+
+        if v:
+            vols.append(v)
+
+    if not vols:
+        ADV_CACHE[ticker] = 1000000
+        return 1000000
+
+    adv = sum(vols) / len(vols)
+
+    ADV_CACHE[ticker] = adv
+
+    return adv
+    
 def get_float_and_sector(ticker):
     if ticker in FLOAT_MAP and ticker in SECTOR_MAP:
         return
@@ -610,13 +657,16 @@ def prefilter(target_date, target_time, tickers, spy_bars=None):
             continue
 
         total_volume = sum([as_float(b.get("v")) or 0 for b in bars])
-        if total_volume < 200000:
+        if total_volume < 75000:
             continue
 
         move_pct = ((last - first) / max(first, 0.01)) * 100
-        rvol = total_volume / 1000000
+        avg_daily_volume = get_avg_daily_volume(ticker)
+
+        rvol = total_volume / max(avg_daily_volume, 1)
 
         greens = 0
+        
         for b in bars[-30:]:
             o = as_float(b.get("o"))
             c = as_float(b.get("c"))
@@ -680,8 +730,8 @@ def prefilter(target_date, target_time, tickers, spy_bars=None):
     df = df.sort_values(["score", "rvol"], ascending=False)
 
     print("\n🔥 PREFILTER")
-    print(df.head(25).to_string(index=False))
-    return df.head(25)["ticker"].tolist()
+    print(df.head(75).to_string(index=False))
+    return df.head(TOP_SCAN)["ticker"].tolist()
 
 # =========================
 # INTRADAY ANALYSIS
@@ -874,7 +924,9 @@ def run_scan(date_str, time_str, tickers):
             continue
 
         total_vol = sum([as_float(b.get("v")) or 0 for b in bars])
-        rvol = total_vol / 1000000
+        avg_daily_volume = get_avg_daily_volume(ticker)
+
+        rvol = total_vol / max(avg_daily_volume, 1)
 
         dp = dark_pool_proxy(bars)
         morning = morning_runner_detector(bars)
