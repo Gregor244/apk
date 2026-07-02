@@ -11,6 +11,7 @@ import sqlite3
 import datetime as dt
 from collections import defaultdict
 from zoneinfo import ZoneInfo
+from tzlocal import get_localzone
 
 import numpy as np
 import pandas as pd
@@ -20,6 +21,13 @@ import requests
 # CONFIG
 # =========================
 
+OUTPUT_DIR = "scan_outputs"
+
+os.makedirs(
+    OUTPUT_DIR,
+    exist_ok=True
+)
+
 API_KEY = "PKOCPAEYJMYE7DOVDWX676BTMV"
 API_SECRET = "73p5TC3sA4c7f47cUjqVniJ5q1jR9tQnEvfBjWae7WNV"
 
@@ -28,6 +36,7 @@ if not API_KEY or not API_SECRET:
 
 BASE_URL = "https://data.alpaca.markets/v2"
 NY = ZoneInfo("America/New_York")
+LOCAL_TZ = get_localzone()
 
 MIN_PRICE = 0.20
 MAX_PRICE = 25.0
@@ -39,7 +48,6 @@ REQUEST_SLEEP = 0.12
 DB_FILE = "scanner_history.db"
 
 ADV_CACHE = {}
-INTRADAY_RVOL_CACHE = {}
 
 # =========================
 # FINNHUB CONFIG
@@ -124,6 +132,79 @@ conn.commit()
 # HELPERS
 # =========================
 
+# =========================
+# SAVE RESULTS
+# =========================
+
+def save_scan_output(df, earnings_data=None):
+
+    ts = dt.datetime.now(
+        LOCAL_TZ
+    ).strftime("%Y%m%d_%H%M%S")
+
+    file_path = os.path.join(
+        OUTPUT_DIR,
+        f"scan_{ts}.xlsx"
+    )
+
+    with pd.ExcelWriter(
+        file_path,
+        engine="openpyxl"
+    ) as writer:
+
+        df.to_excel(
+            writer,
+            sheet_name="scan",
+            index=False
+        )
+
+        if earnings_data:
+
+            earnings_df = pd.DataFrame(
+                earnings_data
+            )
+
+            earnings_df.to_excel(
+                writer,
+                sheet_name="earnings",
+                index=False
+            )
+
+    print(
+        f"\n💾 SAVED TO: {file_path}"
+    )
+# =========================
+# FLOAT FORMAT
+# =========================
+
+def format_float_million(v):
+
+    if v is None:
+        return "N/A"
+
+    try:
+        v = float(v)
+    except:
+        return "N/A"
+
+    if v <= 0:
+        return "N/A"
+
+    return round(v, 2)
+    
+def et_to_local(et_dt):
+
+    if et_dt.tzinfo is None:
+        et_dt = et_dt.replace(tzinfo=NY)
+
+    return et_dt.astimezone(LOCAL_TZ)
+
+def format_local_time(et_dt):
+
+    local_dt = et_to_local(et_dt)
+
+    return local_dt.strftime("%Y-%m-%d %H:%M")
+            
 def as_float(v):
     try:
         return float(v)
@@ -161,104 +242,6 @@ def time_of_day_rvol(current_volume, avg_daily_volume, minutes_elapsed):
     expected_fraction = 0.12 * math.sqrt(max(fraction, 0.01))
     expected_volume = avg_daily_volume * expected_fraction
     return current_volume / max(expected_volume, 1)
-
-def true_intraday_rvol(ticker, current_volume, target_dt, lookback_days=10):
-
-    cache_key = f"{ticker}_{target_dt.strftime('%H:%M')}"
-
-    if cache_key in INTRADAY_RVOL_CACHE:
-
-        avg_same_time_volume = INTRADAY_RVOL_CACHE[cache_key]
-
-        return current_volume / max(avg_same_time_volume, 1)
-
-    market_open = target_dt.replace(
-        hour=9,
-        minute=30,
-        second=0,
-        microsecond=0
-    )
-
-    minutes_elapsed = int(
-        (target_dt - market_open).total_seconds() / 60
-    )
-
-    if minutes_elapsed <= 0:
-        return 0
-
-    end_day = target_dt.replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0
-    )
-
-    start_day = end_day - dt.timedelta(days=lookback_days * 3)
-
-    try:
-
-        data = api_get("/stocks/bars", {
-            "symbols": ticker,
-            "timeframe": "1Min",
-            "start": start_day.isoformat(),
-            "end": end_day.isoformat(),
-            "feed": "iex",
-            "adjustment": "raw",
-            "limit": 10000
-        })
-
-    except Exception as e:
-
-        print(f"RVOL ERROR {ticker}: {e}")
-
-        return 1.0
-
-    bars = data.get("bars", {}).get(ticker, [])
-
-    if not bars:
-        return 1.0
-
-    daily_cumulative = defaultdict(float)
-
-    for b in bars:
-
-        ts = parse_bar_time(b.get("t"))
-
-        if not ts:
-            continue
-
-        if ts.hour < 9 or (ts.hour == 9 and ts.minute < 30):
-            continue
-
-        session_minutes = int(
-            ((ts.hour * 60 + ts.minute) - (9 * 60 + 30))
-        )
-
-        if session_minutes > minutes_elapsed:
-            continue
-
-        volume = as_float(b.get("v"))
-
-        if not volume:
-            continue
-
-        day_key = ts.date()
-
-        daily_cumulative[day_key] += volume
-
-    cumulative_samples = list(daily_cumulative.values())
-
-    if len(cumulative_samples) < 3:
-        return 1.0
-
-    avg_same_time_volume = (
-        sum(cumulative_samples)
-        / len(cumulative_samples)
-    )
-
-    INTRADAY_RVOL_CACHE[cache_key] = avg_same_time_volume
-
-    return current_volume / max(avg_same_time_volume, 1)
 
 # =========================
 # FLOAT ROTATION
@@ -416,7 +399,43 @@ def liquidity_sweep_detector(bars):
             sweeps += 1
     return sweeps * 3
 
+# =========================
+# BUY VOLUME PRESSURE
+# =========================
 
+def calc_buy_volume(bars):
+
+    total_volume = 0
+    buy_volume = 0
+    buy_bars = 0
+
+    for b in bars:
+
+        o = as_float(b.get("o"))
+        c = as_float(b.get("c"))
+        v = as_float(b.get("v"))
+
+        if not all([o, c, v]):
+            continue
+
+        total_volume += v
+
+        if c >= o:
+            buy_volume += v
+            buy_bars += 1
+
+    buy_volume_pct = 0
+
+    if total_volume > 0:
+        buy_volume_pct = (
+            buy_volume / total_volume
+        ) * 100
+
+    return {
+        "buy_volume": round(buy_volume, 0),
+        "buy_volume_pct": round(buy_volume_pct, 2),
+        "buy_bars": buy_bars
+    }
 
 # =========================
 # API CONNECTIONS
@@ -554,55 +573,81 @@ def build_float_sector_cache(tickers):
     save_json_cache(SECTOR_CACHE_FILE, SECTOR_MAP)
     print(f"\nCACHE DONE ({updated} updated)")
 
-def get_upcoming_earnings(tickers_list):
-    """
-    Pobiera wyniki finansowe na dziś i jutro z Finnhub,
-    filtruje po liście TICKERS i dołącza statystyki spółki.
-    """
-    # Używamy strefy ET (Nowy Jork) dla spójności kalendarza giełdowego
+def get_upcoming_earnings(tickers_list, lookahead_days=7):
+
     today = dt.datetime.now(NY).date()
-    tomorrow = today + dt.timedelta(days=2)
-    
-    start_date = today.strftime('%Y-%m-%d')
-    end_date = tomorrow.strftime('%Y-%m-%d')
-    
-    print(f"\n📡 POBIERANIE WYNIKÓW FINANSOWYCH ({start_date} do {end_date})...")
-    
-    # Endpoint Finnhub
-    params = {"from": start_date, "to": end_date}
-    
+    end_date = today + dt.timedelta(days=lookahead_days)
+
+    print(f"\n📡 POBIERANIE WYNIKÓW FINANSOWYCH ({today} do {end_date})...")
+
+    params = {
+        "from": today.isoformat(),
+        "to": end_date.isoformat()
+    }
+
     try:
         data = finnhub_get("/calendar/earnings", params)
+
     except Exception as e:
         print(f"⚠️ Błąd pobierania kalendarza wyników: {e}")
         return []
 
     earnings_list = []
-    
-    if data and "earningsCalendar" in data:
-        for item in data["earningsCalendar"]:
-            ticker = item.get("symbol")
-            
-            # Filtrujemy tylko spółki, które skanujesz, aby odsiać śmieci
-            if ticker in tickers_list:
-                date = item.get("date")
-                eps_est = item.get("epsEstimate")
-                rev_est = item.get("revenueEstimate")
-                
-                # Pobranie danych strukturalnych z lokalnego cache
-                float_shares = FLOAT_MAP.get(ticker, 0)
-                sector = SECTOR_MAP.get(ticker, "UNKNOWN")
-                
-                earnings_list.append({
-                    "ticker": ticker,
-                    "date": date,
-                    "eps_est": eps_est if eps_est else 0.0,
-                    "rev_est": rev_est if rev_est else 0,
-                    "float": float_shares,
-                    "sector": sector
-                })
-                
+
+    items = (data or {}).get("earningsCalendar", [])
+
+    for item in items:
+
+        ticker = (item.get("symbol") or "").strip().upper()
+        date = item.get("date")
+
+        if not ticker:
+            continue
+
+        if ticker not in tickers_list:
+            continue
+
+        if not date:
+            continue
+
+        if date < today.isoformat():
+            continue
+
+        if date > end_date.isoformat():
+            continue
+
+        # AUTOMATYCZNE DOCIĄGANIE FLOAT / SECTOR
+        if ticker not in FLOAT_MAP or ticker not in SECTOR_MAP:
+            get_float_and_sector(ticker)
+
+        eps_est = item.get("epsEstimate")
+        rev_est = item.get("revenueEstimate")
+
+        fl = FLOAT_MAP.get(ticker)
+
+        if fl:
+            fl = fl
+        else:
+            fl = None
+
+        earnings_list.append({
+            "ticker": ticker,
+            "date": date,
+            "eps_est": eps_est if eps_est else 0.0,
+            "rev_est": rev_est if rev_est else 0,
+            "float": fl,
+            "sector": SECTOR_MAP.get(ticker, "UNKNOWN")
+        })
+
+    earnings_list.sort(
+        key=lambda x: (
+            x["date"],
+            x["ticker"]
+        )
+    )
+
     return earnings_list
+    
 # =========================
 # MARKET REGIME
 # =========================
@@ -762,11 +807,7 @@ def prefilter(target_date, target_time, tickers, spy_bars=None):
         move_pct = ((last - first) / max(first, 0.01)) * 100
         avg_daily_volume = get_avg_daily_volume(ticker)
 
-        rvol = true_intraday_rvol(
-        ticker,
-        total_volume,
-        local_dt
-        )
+        rvol = total_volume / max(avg_daily_volume, 1)
 
         greens = 0
         
@@ -843,6 +884,7 @@ def prefilter(target_date, target_time, tickers, spy_bars=None):
 def analyze_intraday(bars):
     if len(bars) < 20:
         return None
+
     vols = []
     closes = []
     highs = []
@@ -865,6 +907,7 @@ def analyze_intraday(bars):
         v = as_float(b.get("v"))
         if not all([o, h, l, c, v]):
             continue
+
         vols.append(v)
         closes.append(c)
         highs.append(h)
@@ -884,12 +927,15 @@ def analyze_intraday(bars):
             spike = True
             if i < 45:
                 early_spike = True
+
         if c < o:
             red_streak += 1
         else:
             red_streak = 0
+
         if red_streak >= 5:
             strong_red = True
+
         if i >= len(bars) * 0.7:
             late_vol += v
 
@@ -904,25 +950,67 @@ def analyze_intraday(bars):
     late_vol_ratio = late_vol / max(total_vol, 1)
     vwap_extension = ((final_close - vwap) / max(vwap, 0.01)) * 100
     dump_ratio = (day_high - final_close) / day_range
-    recent_high = max(highs[-20:])
-    breakout_proximity = ((recent_high - final_close) / max(final_close, 0.01)) * 100
     compression = (max(highs[-10:]) - min(lows[-10:])) / max(final_close, 0.01)
 
+    # WAŻNE: poziom oporu liczony z wcześniejszych świec, a nie z ostatniej
+    if len(highs) > 8:
+        resistance_window = highs[:-3]
+    else:
+        resistance_window = highs[:-1] if len(highs) > 1 else highs
+
+    resistance = max(resistance_window) if resistance_window else day_high
+    breakout_from_resistance = ((final_close - resistance) / max(resistance, 0.01)) * 100
+
+    # Setupy utrzymane przez 0-3% nad oporem
     pre_breakout = (
-        breakout_proximity < 2
+        breakout_from_resistance >= -0.5
+        and breakout_from_resistance <= 1.5
         and compression < 0.03
         and close_strength > 0.7
         and trend_pct > 2
     )
+
+    breakout = (
+        breakout_from_resistance > 1.5
+        and breakout_from_resistance <= 3.0
+        and trend_pct > 2
+        and late_vol_ratio > 0.12
+    )
+
+    continuation = (
+        breakout_from_resistance > 3.0
+        and breakout_from_resistance <= 6.0
+        and trend_pct > 2
+        and late_vol_ratio > 0.10
+    )
+
     relative_strength = close_strength * max(trend_pct, 0)
+    
+    breakout_proximity = abs(
+    breakout_from_resistance
+)
 
     return {
-        "spike": spike, "early_spike": early_spike, "strong_red": strong_red,
-        "max_spike": round(max_spike, 2), "close_strength": round(close_strength, 2),
-        "trend_pct": round(trend_pct, 2), "late_vol_ratio": round(late_vol_ratio, 2),
-        "vwap_extension": round(vwap_extension, 2), "dump_ratio": round(dump_ratio, 2),
-        "pre_breakout": pre_breakout, "breakout_proximity": round(breakout_proximity, 2),
-        "compression": round(compression, 4), "relative_strength": round(relative_strength, 2)
+        "spike": spike,
+        "early_spike": early_spike,
+        "strong_red": strong_red,
+        "max_spike": round(max_spike, 2),
+        "close_strength": round(close_strength, 2),
+        "trend_pct": round(trend_pct, 2),
+        "late_vol_ratio": round(late_vol_ratio, 2),
+        "vwap_extension": round(vwap_extension, 2),
+        "dump_ratio": round(dump_ratio, 2),
+        "pre_breakout": pre_breakout,
+        "breakout": breakout,
+        "continuation": continuation,
+        "resistance": round(resistance, 2),
+        "breakout_from_resistance": round(breakout_from_resistance, 2),
+        "compression": round(compression, 4),
+        "relative_strength": round(relative_strength, 2),
+       "breakout_proximity": round(
+    breakout_proximity,
+    2
+),
     }
 
 # =========================
@@ -980,109 +1068,348 @@ def ml_probability_model(ticker, analysis, dp, morning, sector_score, news_score
 # =========================
 # MAIN SCAN
 # =========================
-
 def run_scan(date_str, time_str, tickers):
-    target_date = dt.datetime.strptime(date_str, "%Y-%m-%d").date()
-    hh, mm = map(int, time_str.split(":"))
+
+    target_date = dt.datetime.strptime(
+        date_str,
+        "%Y-%m-%d"
+    ).date()
+
+    hh, mm = map(
+        int,
+        time_str.split(":")
+    )
+
     target_time = dt.time(hh, mm)
 
-    local_dt = dt.datetime.combine(target_date, target_time, tzinfo=NY)
-    start_dt = local_dt.replace(hour=5, minute=0, second=0, microsecond=0)
+    user_local_dt = dt.datetime.combine(
+        target_date,
+        target_time,
+        tzinfo=LOCAL_TZ
+    )
 
-    # SPY Data Retrieval
+    local_dt = user_local_dt.astimezone(NY)
+
+    start_dt = local_dt.replace(
+        hour=5,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
+
+    # SPY
     try:
-        spy_bars_dict = get_stock_bars(["SPY"], "1Min", start_dt.isoformat(), local_dt.isoformat())
-        spy_bars = spy_bars_dict.get("SPY", [])
+
+        spy_bars_dict = get_stock_bars(
+            ["SPY"],
+            "1Min",
+            start_dt.isoformat(),
+            local_dt.isoformat()
+        )
+
+        spy_bars = spy_bars_dict.get(
+            "SPY",
+            []
+        )
+
     except:
         spy_bars = []
 
-    # Prefilter Execution
-    filtered = prefilter(target_date, target_time, tickers, spy_bars)
+    # PREFILTER
+    filtered = prefilter(
+        target_date,
+        target_time,
+        tickers,
+        spy_bars
+    )
+
     if not filtered:
         print("\nNO PREFILTER MATCHES")
         return pd.DataFrame()
 
-    intraday = get_stock_bars(filtered, "1Min", start_dt.isoformat(), local_dt.isoformat())
+    intraday = get_stock_bars(
+        filtered,
+        "1Min",
+        start_dt.isoformat(),
+        local_dt.isoformat()
+    )
+
     results = []
     leaders = {}
 
+    # LEADERS
     for ticker in filtered:
+
         bars = intraday.get(ticker, [])
+
         if not bars:
             continue
+
         first = as_float(bars[0].get("c"))
         last = as_float(bars[-1].get("c"))
-        if first and last:
-            leaders[ticker] = ((last - first) / first) * 100
 
+        if first and last:
+
+            leaders[ticker] = (
+                ((last - first) / first) * 100
+            )
+
+    # MAIN ANALYSIS
     for ticker, bars in intraday.items():
+
         if not bars:
             continue
-        last_price = as_float(bars[-1].get("c"))
-        if not last_price or last_price < MIN_PRICE or last_price > MAX_PRICE:
+
+        last_price = as_float(
+            bars[-1].get("c")
+        )
+
+        if not last_price:
+            continue
+
+        if last_price < MIN_PRICE:
+            continue
+
+        if last_price > MAX_PRICE:
             continue
 
         analysis = analyze_intraday(bars)
+
         if not analysis:
             continue
 
-        total_vol = sum([as_float(b.get("v")) or 0 for b in bars])
-        avg_daily_volume = get_avg_daily_volume(ticker)
+        total_vol = sum([
+            as_float(b.get("v")) or 0
+            for b in bars
+        ])
 
-        rvol = true_intraday_rvol(
-        ticker,
-        total_vol,
-        local_dt
+        avg_daily_volume = get_avg_daily_volume(
+            ticker
+        )
+
+        rvol = total_vol / max(
+            avg_daily_volume,
+            1
         )
 
         dp = dark_pool_proxy(bars)
-        morning = morning_runner_detector(bars)
-        news_score = news_nlp_score(ticker)
-        sector_score = sector_sympathy_score(ticker, leaders)
-        sweep_score = liquidity_sweep_detector(bars)
+
+        morning = morning_runner_detector(
+            bars
+        )
+
+        news_score = news_nlp_score(
+            ticker
+        )
+
+        sector_score = sector_sympathy_score(
+            ticker,
+            leaders
+        )
+
+        sweep_score = liquidity_sweep_detector(
+            bars
+        )
+
+        buy_stats = calc_buy_volume(
+            bars
+        )
 
         ml = ml_probability_model(
-            ticker, analysis, dp, morning, sector_score, news_score, sweep_score, rvol, bars
+            ticker,
+            analysis,
+            dp,
+            morning,
+            sector_score,
+            news_score,
+            sweep_score,
+            rvol,
+            bars
         )
 
         results.append({
-            "ticker": ticker, "price": round(last_price, 2), "ml_score": ml["score"],
-            "breakout": ml["breakout_probability"], "continuation": ml["continuation_probability"],
-            "fail": ml["fail_probability"], "runner": morning["runner"], "pre_bo": analysis["pre_breakout"],
-            "hidden_buy": dp["hidden_buying"], "trend": analysis["trend_pct"], "rvol": round(rvol, 2),
-            "sector": round(sector_score, 2), "news": round(news_score, 2)
+
+            "ticker": ticker,
+
+            "price": round(
+                last_price,
+                2
+            ),
+
+            "ml_score": ml["score"],
+
+            "breakout": ml[
+                "breakout_probability"
+            ],
+
+            "continuation": ml[
+                "continuation_probability"
+            ],
+
+            "fail": ml[
+                "fail_probability"
+            ],
+
+            "runner": morning["runner"],
+
+            "pre_bo": analysis[
+                "pre_breakout"
+            ],
+
+            "hidden_buy": dp[
+                "hidden_buying"
+            ],
+
+            "trend": analysis[
+                "trend_pct"
+            ],
+
+            "rvol": round(
+                rvol,
+                2
+            ),
+
+            "buy_volume": buy_stats[
+                "buy_volume"
+            ],
+
+            "buy_volume_pct": buy_stats[
+                "buy_volume_pct"
+            ],
+
+            "buy_bars": buy_stats[
+                "buy_bars"
+            ],
+
+            "sector": round(
+                sector_score,
+                2
+            ),
+
+            "news": round(
+                news_score,
+                2
+            )
         })
 
     df = pd.DataFrame(results)
+
     if df.empty:
         return df
-    return df.sort_values(["breakout", "continuation", "ml_score"], ascending=False)
+
+    df = df.sort_values(
+        [
+            "breakout",
+            "continuation",
+            "ml_score"
+        ],
+        ascending=False
+    )
+
+    return df
 
 # =========================
 # PRETTY PRINT
 # =========================
 
 def print_results(df):
+
     if df.empty:
         print("\nNO RESULTS\n")
         return
 
-    print("\n" + "=" * 90)
-    print("🔥 TOP BREAKOUT CANDIDATES")
-    print("=" * 90)
-    print(df.head(5)[[
-        "ticker", "price", "breakout", "continuation", "ml_score", 
-        "trend", "rvol", "runner", "pre_bo", "hidden_buy"
-    ]].to_string(index=False))
+    print("\n" + "=" * 140)
+    print("🔥 MAIN SCAN RESULTS")
+    print("=" * 140)
 
-    print("\n" + "=" * 90)
-    print("⚡ PRE-BREAKOUT SETUPS")
-    print("=" * 90)
-    pre = df[df["pre_bo"] == True].head(5)
-    if pre.empty:
-        print("No strong pre-breakout setups")
-    else:
-        print(pre[["ticker", "breakout", "continuation", "trend", "rvol", "sector", "news"]].to_string(index=False))
+    cols = [
+
+        "ticker",
+        "price",
+
+        "breakout",
+        "continuation",
+
+        "ml_score",
+
+        "trend",
+        "rvol",
+
+        "buy_volume",
+        "buy_volume_pct",
+
+        "runner",
+        "pre_bo",
+        "hidden_buy"
+    ]
+
+    print(
+        df.head(15)[cols].to_string(
+            index=False
+        )
+    )
+
+    # =========================
+    # HIGHEST RVOL
+    # =========================
+
+    print("\n" + "=" * 140)
+    print("⚡ HIGHEST RVOL")
+    print("=" * 140)
+
+    top_rvol = df.sort_values(
+        [
+            "rvol",
+            "buy_volume_pct",
+            "breakout"
+        ],
+        ascending=False
+    ).head(5)
+
+    print(
+        top_rvol[
+            [
+                "ticker",
+                "rvol",
+                "buy_volume",
+                "buy_volume_pct",
+                "breakout",
+                "continuation",
+                "price"
+            ]
+        ].to_string(index=False)
+    )
+
+    # =========================
+    # HIGHEST BUY PRESSURE
+    # =========================
+
+    print("\n" + "=" * 140)
+    print("🟢 HIGHEST BUY PRESSURE")
+    print("=" * 140)
+
+    top_buy = df.sort_values(
+        [
+            "buy_volume_pct",
+            "buy_volume",
+            "rvol"
+        ],
+        ascending=False
+    ).head(5)
+
+    print(
+        top_buy[
+            [
+                "ticker",
+                "buy_volume",
+                "buy_volume_pct",
+                "rvol",
+                "breakout",
+                "continuation",
+                "price"
+            ]
+        ].to_string(index=False)
+    )
 
 
 # =========================================================
@@ -1364,26 +1691,6 @@ def print_earnings_radar(earnings_list):
         )
     )
 
-    print("\n")
-    print("=" * 220)
-    print("🚀 TOP EARNINGS SETUPS")
-    print("=" * 220)
-
-    top = df.head(10)
-
-    for _, r in top.iterrows():
-
-        print(
-            f"{r['ticker']} | "
-            f"Score={r['earnings_score']} | "
-            f"IV={r['iv_rank']} | "
-            f"Short={r['short_interest']}% | "
-            f"Move={r['expected_move']}% | "
-            f"BeatRate={r['beat_rate']}% | "
-            f"Flow={r['options_flow']}"
-        )
-
-    print("\n")
     print("=" * 220)
     print("📌 LEGEND")
     print("=" * 220)
@@ -1407,7 +1714,7 @@ def print_earnings_radar(earnings_list):
 
 if __name__ == "__main__":
     print("\n🔥 PRO SCANNER v3.0")
-    print("TIME = NEW YORK TIME (ET)")
+    print(f"LOCAL TIMEZONE = {LOCAL_TZ}")
     print("AI + ML + PREMARKET ENGINE\n")
 
 
@@ -1562,7 +1869,7 @@ if __name__ == "__main__":
         "WST","WTI","WTRG","WTS","WTTR","WU","WWD","WWW","WY","WYNN",
         "XEL","XOM","XP","XPEL","XPEV","XRAY","XRX","XYL","XYZ","YETI",
         "YMM","YPF","YUM","YUMC","Z","ZBH","ZBRA","ZD","ZION","ZM",
-        "ZS","ZTO","ZTS","EVAX","VRDN","VRAX","ABVX","PRPO","UFI",
+        "ZS","ZTO","ZTS","EVAX","VRDN","VRAX","ABVX","AVAV","PRPO","UFI",
     ]
 
     # Dynamic Cache Verification / Finnhub Synchronization
@@ -1576,3 +1883,16 @@ if __name__ == "__main__":
 
     earnings_data = get_upcoming_earnings(TICKERS)
     print_earnings_radar(earnings_data)
+    
+ #   earnings_data = get_upcoming_earnings(
+#    TICKERS
+#)
+
+#print_earnings_radar(
+#    earnings_data
+#)
+
+save_scan_output(
+    df,
+    earnings_data
+)
